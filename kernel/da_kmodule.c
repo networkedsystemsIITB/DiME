@@ -18,7 +18,17 @@ unsigned int da_debug_flag =    DA_DEBUG_ALERT_FLAG |
                                 DA_DEBUG_ERROR_FLAG | 
                                 DA_DEBUG_ENTRYEXIT_FLAG;
 
-/*
+
+// Set your hook function name, which is exported from fault.c, here
+#define HOOK_FN_NAME do_page_fault_hook_start
+extern int (*HOOK_FN_NAME) (struct pt_regs *regs, 
+                            unsigned long error_code, 
+                            unsigned long address);
+int do_page_fault_hook_new (struct pt_regs *regs, 
+                            unsigned long error_code, 
+                            unsigned long address);
+
+/*****
  *
  *  Module params
  *
@@ -30,8 +40,34 @@ MODULE_DESCRIPTION("Disaggregation Emulator");
 int pid = 10;
 module_param(pid, int, 0);
 
-/*
- *  Returns pointer to pte using virtual address
+
+/*****
+ *
+ *  init_module & cleanup_module
+ *
+ *  Description:
+ *      initialize & cleanup modules
+ */
+int init_module(void)
+{
+    DA_ENTRY();
+    HOOK_FN_NAME = do_page_fault_hook_new;
+    DA_INFO("hook insertion complete, tracking on %d", pid);
+    DA_EXIT();
+    return 0;    // Non-zero return means that the module couldn't be loaded.
+}
+void cleanup_module(void)
+{
+    DA_ENTRY();
+    HOOK_FN_NAME = NULL;                    // Removing hook, setting to NULL
+    DA_INFO("cleaning up module complete");
+    DA_EXIT();
+}
+
+/*  get_ptep
+ *
+ *  Description:
+ *      Returns pointer to PTE corresponding to given virtual address
  */
 pte_t * get_ptep(struct mm_struct *mm, unsigned long virt) {
     //struct page * page;
@@ -56,17 +92,12 @@ pte_t * get_ptep(struct mm_struct *mm, unsigned long virt) {
 }
 
 
-/*
+/*  do_page_fault_hook_new
  *
- *  Hook functions
- *
+ *  Description:
+ *      Page fault function hook function
  */
-// Set your hook function name, which is exported from fault.c, here
-#define HOOK_FN_NAME do_page_fault_hook_start
-extern int (*HOOK_FN_NAME) (struct pt_regs *regs, 
-                            unsigned long error_code, 
-                            unsigned long address);
-unsigned long last_fault_addr = NULL;
+unsigned long last_fault_addr = 0;
 int do_page_fault_hook_new (struct pt_regs *regs, 
                             unsigned long error_code, 
                             unsigned long address) {
@@ -74,45 +105,28 @@ int do_page_fault_hook_new (struct pt_regs *regs,
 
     if(current->pid == pid) {
         ptep = get_ptep(current->mm, address);
-        DA_INFO("page fault %d", current->pid);
         if(ptep) {
             // page fault IS induced by us
-            if ( (pte_flags(*ptep) & _PAGE_PROTNONE) && !(pte_flags(*ptep) & _PAGE_PRESENT) ) { //&& (pte_flags(*ptep) & _PAGE_PAT)) {
-
-                DA_INFO("page fault induced by clearing present bit %d", current->pid);
+            if ( (pte_flags(*ptep) & _PAGE_PROTNONE) && !(pte_flags(*ptep) & _PAGE_PRESENT) ) {
+                DA_INFO("page fault induced by clearing present bit %lu", address);
                 // Set present bit 1, protnone 0
                 set_pte( ptep , pte_set_flags(*ptep, _PAGE_PRESENT) );
                 set_pte( ptep , pte_clear_flags(*ptep, _PAGE_PROTNONE) );
-                //set_pte( ptep , pte_clear_flags(*ptep, _PAGE_PAT) );
+            }
+            // Remember this address for future
+            last_fault_addr = address;
+        }
+
+        // Check if last faulted page is not same as current
+        if(last_fault_addr && address != last_fault_addr) {
+            ptep = get_ptep(current->mm, last_fault_addr);
+            if(ptep && pte_present(*ptep)) {
+                // Restore the bits
+                set_pte( ptep , pte_clear_flags(*ptep, _PAGE_PRESENT) );
+                set_pte( ptep , pte_set_flags(*ptep, _PAGE_PROTNONE) );
             }
         }
     }
 
     return 0;
-}
-
-
-/*
- *
- *  Module initialization and clean up
- *
- */
-int init_module(void)
-{
-    DA_ENTRY();
-    DA_WARNING("war");
-    DA_ERROR("err");
-    DA_ALERT("alert");
-    
-    HOOK_FN_NAME = do_page_fault_hook_new;
-    DA_INFO("hook insertion complete, tracking on %d", pid);
-    DA_EXIT();
-    return 0;    // Non-zero return means that the module couldn't be loaded.
-}
-void cleanup_module(void)
-{
-    DA_ENTRY();
-    HOOK_FN_NAME = NULL;                    // Removing hook, setting to NULL
-    DA_INFO("cleaning up module complete");
-    DA_EXIT();
 }
