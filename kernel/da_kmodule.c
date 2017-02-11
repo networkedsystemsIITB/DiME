@@ -28,6 +28,9 @@ int do_page_fault_hook_new (struct pt_regs *regs,
                             unsigned long error_code, 
                             unsigned long address);
 
+void protect_pages(struct mm_struct * mm);
+struct task_struct* get_task_by_pid(pid_t pid);
+
 /*****
  *
  *  Module params
@@ -50,9 +53,14 @@ module_param(pid, int, 0);
  */
 int init_module(void)
 {
+    struct task_struct *ts;
     DA_ENTRY();
     HOOK_FN_NAME = do_page_fault_hook_new;
     DA_INFO("hook insertion complete, tracking on %d", pid);
+
+    DA_INFO("clearing pages");
+    ts = get_task_by_pid(pid);              // Get task struct of tracking pid
+    protect_pages(ts->mm);                  // Set protected bit for all pages
     DA_EXIT();
     return 0;    // Non-zero return means that the module couldn't be loaded.
 }
@@ -70,7 +78,7 @@ void cleanup_module(void)
  *      Returns pointer to PTE corresponding to given virtual address
  */
 pte_t * get_ptep(struct mm_struct *mm, unsigned long virt) {
-    //struct page * page;
+    struct page * page;
     pud_t *pud;
     pmd_t *pmd;
     pte_t *pte;
@@ -85,8 +93,8 @@ pte_t * get_ptep(struct mm_struct *mm, unsigned long virt) {
         return NULL;
     if (!(pte = pte_offset_map(pmd, virt)))
         return NULL;
-    //if (!(page = pte_page(*pte)))
-    //    return NULL;
+    if (!(page = pte_page(*pte)))       // TODO:: Verify if required to check if page == NULL
+        return NULL;
 
     return pte;
 }
@@ -101,23 +109,10 @@ unsigned long last_fault_addr = 0;
 int do_page_fault_hook_new (struct pt_regs *regs, 
                             unsigned long error_code, 
                             unsigned long address) {
-    pte_t * ptep = NULL;
+    pte_t* ptep = NULL;
 
     if(current->pid == pid) {
-        ptep = get_ptep(current->mm, address);
-        if(ptep) {
-            // page fault IS induced by us
-            if ( (pte_flags(*ptep) & _PAGE_PROTNONE) && !(pte_flags(*ptep) & _PAGE_PRESENT) ) {
-                DA_INFO("page fault induced by clearing present bit %lu", address);
-                // Set present bit 1, protnone 0
-                set_pte( ptep , pte_set_flags(*ptep, _PAGE_PRESENT) );
-                set_pte( ptep , pte_clear_flags(*ptep, _PAGE_PROTNONE) );
-            }
-            // Remember this address for future
-            last_fault_addr = address;
-        }
-
-        // Check if last faulted page is not same as current
+        // Ceck if last faulted page is not same as current
         if(last_fault_addr && address != last_fault_addr) {
             ptep = get_ptep(current->mm, last_fault_addr);
             if(ptep && pte_present(*ptep)) {
@@ -126,7 +121,69 @@ int do_page_fault_hook_new (struct pt_regs *regs,
                 set_pte( ptep , pte_set_flags(*ptep, _PAGE_PROTNONE) );
             }
         }
+
+        ptep = get_ptep(current->mm, address);
+        if(ptep) {
+            // Check if page fault IS induced by us
+            if ( (pte_flags(*ptep) & _PAGE_PROTNONE) && !(pte_flags(*ptep) & _PAGE_PRESENT) ) {
+                DA_INFO("page fault induced by clearing present bit %lu", address);
+                // Set present bit 1, protnone 0
+                set_pte( ptep , pte_set_flags(*ptep, _PAGE_PRESENT) );
+                set_pte( ptep , pte_clear_flags(*ptep, _PAGE_PROTNONE) );
+            }
+
+            // Remember this address for future
+            last_fault_addr = address;
+        }
     }
 
     return 0;
+}
+
+
+/*  get_task_by_pid
+ *
+ *  Description:
+ *      Returns task_struct corresponding to a process with given pid
+ */
+struct task_struct* get_task_by_pid(pid_t pid) {
+    struct task_struct *ts = NULL;
+    DA_ENTRY();
+
+    for_each_process (ts) {
+        if (ts->pid == pid) {
+            return ts;
+        }
+    }
+
+    DA_EXIT();
+    return NULL;
+}
+
+
+/*  protect_pages
+ *
+ *  Description:
+ *      Traverse all pages table entries, and sets _PAGE_PROTNONE bit, to make
+ *      page fault for those pages on next page access
+ */
+void protect_pages(struct mm_struct * mm) {
+    DA_ENTRY();
+    if(mm) {
+        struct vm_area_struct *vma = NULL;
+        unsigned long vpage;
+
+        for (vma=mm->mmap ; vma ; vma=vma->vm_next) {
+            for (vpage = vma->vm_start; vpage < vma->vm_end; vpage += PAGE_SIZE) {
+                pte_t *ptep = get_ptep(mm, vpage);
+
+                if(ptep && pte_present(*ptep)) {
+                    DA_INFO("protecting page %lu", vpage);
+                    set_pte( ptep , pte_set_flags(*ptep, _PAGE_PROTNONE) );
+                    set_pte( ptep , pte_clear_flags(*ptep, _PAGE_PRESENT) );
+                }
+            }
+        }
+    }
+    DA_EXIT();
 }
