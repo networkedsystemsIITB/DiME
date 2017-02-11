@@ -20,13 +20,21 @@ unsigned int da_debug_flag =    DA_DEBUG_ALERT_FLAG |
 
 
 // Set your hook function name, which is exported from fault.c, here
-#define HOOK_FN_NAME do_page_fault_hook_start
-extern int (*HOOK_FN_NAME) (struct pt_regs *regs, 
-                            unsigned long error_code, 
-                            unsigned long address);
-int do_page_fault_hook_new (struct pt_regs *regs, 
-                            unsigned long error_code, 
-                            unsigned long address);
+#define HOOK_START_FN_NAME  do_page_fault_hook_start    // Called before __do_page_fault
+#define HOOK_END_FN_NAME    do_page_fault_hook_end      // Called after __do_page_fault
+
+extern int (*HOOK_START_FN_NAME) (struct pt_regs *regs, 
+                                    unsigned long error_code, 
+                                    unsigned long address);
+extern int (*HOOK_END_FN_NAME) (struct pt_regs *regs, 
+                                    unsigned long error_code, 
+                                    unsigned long address);
+int do_page_fault_hook_start_new (struct pt_regs *regs, 
+                                    unsigned long error_code, 
+                                    unsigned long address);
+int do_page_fault_hook_end_new (struct pt_regs *regs, 
+                                    unsigned long error_code, 
+                                    unsigned long address);
 
 void protect_pages(struct mm_struct * mm);
 struct task_struct* get_task_by_pid(pid_t pid);
@@ -40,8 +48,26 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Abhishek Ghogare");
 MODULE_DESCRIPTION("Disaggregation Emulator");
 
-int pid = 10;
-module_param(pid, int, 0);
+static int      pid             = 10;
+static ulong    local_start     = 0;
+static ulong    local_end       = 0;
+static ulong    latency_ns      = 1000ULL;
+static ulong    bandwidth_bps   = 10000000000ULL;
+
+module_param(pid, int, 0);                  // pid cannot be changed directly from sysfs
+module_param(local_start, ulong, 0755);
+module_param(local_end, ulong, 0755);
+module_param(latency_ns, ulong, 0755);
+module_param(bandwidth_bps, ulong, 0755);
+module_param(da_debug_flag, uint, 0755);    // debug level flags, can be set from sysfs
+// TODO: unsigned long is 64bit in x86_64, need to change to ull
+
+MODULE_PARM_DESC(pid, "PID of a process to track");
+MODULE_PARM_DESC(local_start, "First byte of local memory area");
+MODULE_PARM_DESC(local_end, "Next byte of last byte of local memory area");
+MODULE_PARM_DESC(latency_ns, "One way latency in nano-sec");
+MODULE_PARM_DESC(bandwidth_bps, "Bandwidth of network in bits-per-sec");
+MODULE_PARM_DESC(da_debug_flag, "Module debug log level flags");
 
 
 /*****
@@ -55,7 +81,8 @@ int init_module(void)
 {
     struct task_struct *ts;
     DA_ENTRY();
-    HOOK_FN_NAME = do_page_fault_hook_new;
+    HOOK_START_FN_NAME  = do_page_fault_hook_start_new;
+    HOOK_END_FN_NAME    = do_page_fault_hook_end_new;
     DA_INFO("hook insertion complete, tracking on %d", pid);
 
     DA_INFO("clearing pages");
@@ -67,7 +94,8 @@ int init_module(void)
 void cleanup_module(void)
 {
     DA_ENTRY();
-    HOOK_FN_NAME = NULL;                    // Removing hook, setting to NULL
+    HOOK_START_FN_NAME  = NULL; 
+    HOOK_END_FN_NAME    = NULL;                    // Removing hook, setting to NULL
     DA_INFO("cleaning up module complete");
     DA_EXIT();
 }
@@ -100,18 +128,22 @@ pte_t * get_ptep(struct mm_struct *mm, unsigned long virt) {
 }
 
 
-/*  do_page_fault_hook_new
+/*  do_page_fault_hook_start_new
  *
  *  Description:
- *      Page fault function hook function
+ *      do_page_fault hook function
  */
-unsigned long last_fault_addr = 0;
-int do_page_fault_hook_new (struct pt_regs *regs, 
+ulong last_fault_addr   = 0;
+ulong timer_start       = 0;
+int do_page_fault_hook_start_new (struct pt_regs *regs, 
                             unsigned long error_code, 
                             unsigned long address) {
     pte_t* ptep = NULL;
 
     if(current->pid == pid) {
+        // Start timer now, to calculate page fetch delay later
+        timer_start = sched_clock();
+
         // Ceck if last faulted page is not same as current
         if(last_fault_addr && address != last_fault_addr) {
             ptep = get_ptep(current->mm, last_fault_addr);
@@ -126,14 +158,39 @@ int do_page_fault_hook_new (struct pt_regs *regs,
         if(ptep) {
             // Check if page fault IS induced by us
             if ( (pte_flags(*ptep) & _PAGE_PROTNONE) && !(pte_flags(*ptep) & _PAGE_PRESENT) ) {
-                DA_INFO("page fault induced by clearing present bit %lu", address);
+                //DA_INFO("page fault induced by clearing present bit %lu", address);
                 // Set present bit 1, protnone 0
                 set_pte( ptep , pte_set_flags(*ptep, _PAGE_PRESENT) );
                 set_pte( ptep , pte_clear_flags(*ptep, _PAGE_PROTNONE) );
             }
 
-            // Remember this address for future
-            last_fault_addr = address;
+            last_fault_addr = address;          // Remember this address for future
+        }
+    }
+
+    return 0;
+}
+
+/*  do_page_fault_hook_end_new
+ *
+ *  Description:
+ *      do_page_fault hook function, simulates page fetch delay over network
+ */
+int do_page_fault_hook_end_new (struct pt_regs *regs, 
+                            unsigned long error_code, 
+                            unsigned long address) {
+    ulong delay_ns;
+
+    if(current->pid == pid) {
+        // Check if local address range is valid and address IS NOT within it
+        if(local_start < local_end && (address < local_start || local_end <= address)) {
+            // Inject delays here
+            DA_DEBUG("Waiting in delay");
+            delay_ns = ((PAGE_SIZE * 8ULL) * 1000000000) / bandwidth_bps;   // Transmission delay
+            delay_ns += 2*latency_ns;                                       // Two way latency
+            while ((sched_clock() - timer_start) < delay_ns) {
+                // Wait for delay
+            }
         }
     }
 
