@@ -29,10 +29,11 @@ extern unsigned int da_debug_flag;
 
 
 #define DA_DEBUG_ALERT_FLAG     0x00000001
-#define DA_DEBUG_WARNING_FLAG   0x00000002
 #define DA_DEBUG_ERROR_FLAG     0x00000004
+#define DA_DEBUG_WARNING_FLAG   0x00000002
 #define DA_DEBUG_INFO_FLAG      0x00000008
 #define DA_DEBUG_ENTRYEXIT_FLAG 0x00000010
+#define DA_DEBUG_DEBUG          0x00000020
 
 #define DA_ENTRY()                                                                      \
 do {                                                                                    \
@@ -48,6 +49,12 @@ do {                                                                            
     }                                                                                   \
 } while(0)
 
+#define DA_DEBUG(msg, args...)                                                          \
+do {                                                                                    \
+    if (da_debug_flag & DA_DEBUG_DEBUG) {                                               \
+        PRINT_LOG(LOG_INFO,"[DEBUG] :%s:%d\t: " msg, __FUNCTION__,__LINE__, ##args);    \
+    }                                                                                   \
+} while(0)
 
 #define DA_INFO(msg, args...)                                                           \
 do {                                                                                    \
