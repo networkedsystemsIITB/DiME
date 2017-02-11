@@ -18,6 +18,26 @@ unsigned int da_debug_flag =    DA_DEBUG_ALERT_FLAG |
                                 DA_DEBUG_ERROR_FLAG | 
                                 DA_DEBUG_ENTRYEXIT_FLAG;
 
+/*****
+ *
+ *  Two hooks are required to set up in do_page_fault function in fault.c,
+ *  one at the start of the function and other at the end of the function.
+ *  e.g. :
+ *      do_page_fault(struct pt_regs *regs, unsigned long error_code)
+ *      {
+ *          <start_hook>
+ *          .....
+ *          __do_page_fault(regs, error_code, address);
+ *          .....
+ *          <end_hook>
+ *      }
+ *
+ *  We are starting a timer in start hook function, and waiting in end hook
+ *  function, so that we can wait for desired delay more accurately.
+ *
+ *  Set your hook function names to appropriate macros below.
+ *
+ */
 
 // Set your hook function name, which is exported from fault.c, here
 #define HOOK_START_FN_NAME  do_page_fault_hook_start    // Called before __do_page_fault
