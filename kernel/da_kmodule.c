@@ -74,7 +74,7 @@ static ulong    local_end       = 0;
 static ulong    latency_ns      = 1000ULL;
 static ulong    bandwidth_bps   = 10000000000ULL;
 
-module_param(pid, int, 0);                  // pid cannot be changed directly from sysfs
+module_param(pid, int, 0444);              // pid cannot be changed but read directly from sysfs
 module_param(local_start, ulong, 0755);
 module_param(local_end, ulong, 0755);
 module_param(latency_ns, ulong, 0755);
