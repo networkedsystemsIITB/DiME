@@ -11,7 +11,12 @@
 #include <linux/fs.h>
 #include <linux/mm.h>
 
+
 #include "../common/da_debug.h"
+
+#include "da_mem_lib.h"
+#include "da_local_page_list.h"
+
 unsigned int da_debug_flag =    DA_DEBUG_ALERT_FLAG | 
                                 DA_DEBUG_INFO_FLAG | 
                                 DA_DEBUG_WARNING_FLAG | 
@@ -56,7 +61,6 @@ int do_page_fault_hook_end_new (struct pt_regs *regs,
                                     unsigned long error_code, 
                                     unsigned long address);
 
-void protect_pages(struct mm_struct * mm);
 struct task_struct* get_task_by_pid(pid_t pid);
 
 /*****
@@ -65,29 +69,37 @@ struct task_struct* get_task_by_pid(pid_t pid);
  *
  */
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Abhishek Ghogare");
+MODULE_AUTHOR("Abhishek Ghogare, Trishal Patel");
 MODULE_DESCRIPTION("Disaggregation Emulator");
 
 static int      pid             = 10;
-static ulong    local_start     = 0;
-static ulong    local_end       = 0;
 static ulong    latency_ns      = 1000ULL;
 static ulong    bandwidth_bps   = 10000000000ULL;
+       ulong    local_npages    = 2000ULL;
 
-module_param(pid, int, 0444);              // pid cannot be changed but read directly from sysfs
-module_param(local_start, ulong, 0755);
-module_param(local_end, ulong, 0755);
-module_param(latency_ns, ulong, 0755);
-module_param(bandwidth_bps, ulong, 0755);
-module_param(da_debug_flag, uint, 0755);    // debug level flags, can be set from sysfs
+module_param(pid, int, 0444);               // pid cannot be changed but read directly from sysfs
+module_param(latency_ns, ulong, 0644);
+module_param(bandwidth_bps, ulong, 0644);
+module_param(da_debug_flag, uint, 0644);    // debug level flags, can be set from sysfs
+module_param(local_npages, ulong, 0644);    // number of local pages, acts as a cache for remote memory 
 // TODO: unsigned long is 64bit in x86_64, need to change to ull
 
 MODULE_PARM_DESC(pid, "PID of a process to track");
-MODULE_PARM_DESC(local_start, "First byte of local memory area");
-MODULE_PARM_DESC(local_end, "Next byte of last byte of local memory area");
 MODULE_PARM_DESC(latency_ns, "One way latency in nano-sec");
 MODULE_PARM_DESC(bandwidth_bps, "Bandwidth of network in bits-per-sec");
 MODULE_PARM_DESC(da_debug_flag, "Module debug log level flags");
+MODULE_PARM_DESC(local_npages, "Number of available local pages");
+
+
+/*****
+ *
+ *  Local variables
+ *
+ */
+ulong *local_page_list = NULL;  // Circular list of local pages
+ulong local_last_page = 0;      // Head of the circular list
+
+
 
 
 /*****
@@ -101,13 +113,14 @@ int init_module(void)
 {
     struct task_struct *ts;
     DA_ENTRY();
+
     HOOK_START_FN_NAME  = do_page_fault_hook_start_new;
     HOOK_END_FN_NAME    = do_page_fault_hook_end_new;
     DA_INFO("hook insertion complete, tracking on %d", pid);
 
     DA_INFO("clearing pages");
     ts = get_task_by_pid(pid);              // Get task struct of tracking pid
-    protect_pages(ts->mm);                  // Set protected bit for all pages
+    ml_protect_all_pages(ts->mm);           // Set protected bit for all pages
     DA_EXIT();
     return 0;    // Non-zero return means that the module couldn't be loaded.
 }
@@ -116,35 +129,9 @@ void cleanup_module(void)
     DA_ENTRY();
     HOOK_START_FN_NAME  = NULL; 
     HOOK_END_FN_NAME    = NULL;                    // Removing hook, setting to NULL
+    lpl_CleanList();
     DA_INFO("cleaning up module complete");
     DA_EXIT();
-}
-
-/*  get_ptep
- *
- *  Description:
- *      Returns pointer to PTE corresponding to given virtual address
- */
-pte_t * get_ptep(struct mm_struct *mm, unsigned long virt) {
-    struct page * page;
-    pud_t *pud;
-    pmd_t *pmd;
-    pte_t *pte;
-    pgd_t *pgd = pgd_offset(mm, virt);
-    if (pgd_none(*pgd) || pgd_bad(*pgd))
-        return NULL;
-    pud = pud_offset(pgd, virt);
-    if (pud_none(*pud) || pud_bad(*pud))
-        return NULL;
-    pmd = pmd_offset(pud, virt);
-    if (pmd_none(*pmd) || pmd_bad(*pmd))
-        return NULL;
-    if (!(pte = pte_offset_map(pmd, virt)))
-        return NULL;
-    if (!(page = pte_page(*pte)))       // TODO:: Verify if required to check if page == NULL
-        return NULL;
-
-    return pte;
 }
 
 
@@ -158,33 +145,16 @@ ulong timer_start       = 0;
 int do_page_fault_hook_start_new (struct pt_regs *regs, 
                             unsigned long error_code, 
                             unsigned long address) {
-    pte_t* ptep = NULL;
-
     if(current->pid == pid) {
         // Start timer now, to calculate page fetch delay later
         timer_start = sched_clock();
 
-        // Ceck if last faulted page is not same as current
-        if(last_fault_addr && address != last_fault_addr) {
-            ptep = get_ptep(current->mm, last_fault_addr);
-            if(ptep && pte_present(*ptep)) {
-                // Restore the bits
-                set_pte( ptep , pte_clear_flags(*ptep, _PAGE_PRESENT) );
-                set_pte( ptep , pte_set_flags(*ptep, _PAGE_PROTNONE) );
-            }
-        }
-
-        ptep = get_ptep(current->mm, address);
-        if(ptep) {
-            // Check if page fault IS induced by us
-            if ( (pte_flags(*ptep) & _PAGE_PROTNONE) && !(pte_flags(*ptep) & _PAGE_PRESENT) ) {
-                //DA_INFO("page fault induced by clearing present bit %lu", address);
-                // Set present bit 1, protnone 0
-                set_pte( ptep , pte_set_flags(*ptep, _PAGE_PRESENT) );
-                set_pte( ptep , pte_clear_flags(*ptep, _PAGE_PROTNONE) );
-            }
-
+        // Check if last faulted page is not same as current
+        if(address != last_fault_addr) {
+            lpl_AddPage(current->mm, address);
             last_fault_addr = address;          // Remember this address for future
+        } else {
+            DA_WARNING("Page fault on same page in series");
         }
     }
 
@@ -202,15 +172,12 @@ int do_page_fault_hook_end_new (struct pt_regs *regs,
     ulong delay_ns;
 
     if(current->pid == pid) {
-        // Check if local address range is valid and address IS NOT within it
-        if(local_start < local_end && (address < local_start || local_end <= address)) {
-            // Inject delays here
-            DA_DEBUG("Waiting in delay");
-            delay_ns = ((PAGE_SIZE * 8ULL) * 1000000000) / bandwidth_bps;   // Transmission delay
-            delay_ns += 2*latency_ns;                                       // Two way latency
-            while ((sched_clock() - timer_start) < delay_ns) {
-                // Wait for delay
-            }
+        // Inject delays here
+        DA_DEBUG("Waiting in delay");
+        delay_ns = ((PAGE_SIZE * 8ULL) * 1000000000) / bandwidth_bps;   // Transmission delay
+        delay_ns += 2*latency_ns;                                       // Two way latency
+        while ((sched_clock() - timer_start) < delay_ns) {
+            // Wait for delay
         }
     }
 
@@ -235,32 +202,4 @@ struct task_struct* get_task_by_pid(pid_t pid) {
 
     DA_EXIT();
     return NULL;
-}
-
-
-/*  protect_pages
- *
- *  Description:
- *      Traverse all pages table entries, and sets _PAGE_PROTNONE bit, to make
- *      page fault for those pages on next page access
- */
-void protect_pages(struct mm_struct * mm) {
-    DA_ENTRY();
-    if(mm) {
-        struct vm_area_struct *vma = NULL;
-        unsigned long vpage;
-
-        for (vma=mm->mmap ; vma ; vma=vma->vm_next) {
-            for (vpage = vma->vm_start; vpage < vma->vm_end; vpage += PAGE_SIZE) {
-                pte_t *ptep = get_ptep(mm, vpage);
-
-                if(ptep && pte_present(*ptep)) {
-                    DA_INFO("protecting page %lu", vpage);
-                    set_pte( ptep , pte_set_flags(*ptep, _PAGE_PROTNONE) );
-                    set_pte( ptep , pte_clear_flags(*ptep, _PAGE_PRESENT) );
-                }
-            }
-        }
-    }
-    DA_EXIT();
 }

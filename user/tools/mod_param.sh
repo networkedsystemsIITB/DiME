@@ -13,8 +13,7 @@ Usage : $0 [OPERATION]..
 Set module parameters in runtime
 
 Mandatory arguments to long options are mandatory for short options too.
-  -s, --localstart <value>   set start address of local memory
-  -e, --localend   <value>   set end address of local memory
+  -p, --pages      <value>   set number of local pages
   -b, --bandwidth  <value>   set bandwidth in bits-per-sec
   -l, --latency    <value>   set one way latency in nano-sec 
 
@@ -34,24 +33,21 @@ Mandatory arguments to long options are mandatory for short options too.
 }
 
 get_params() {
-    local_start=`cat /sys/module/da_kmodule/parameters/local_start`
-    local_end=`cat /sys/module/da_kmodule/parameters/local_end`
-    bandwidth_bps=`cat /sys/module/da_kmodule/parameters/bandwidth_bps`
-    latency_ns=`cat /sys/module/da_kmodule/parameters/latency_ns`
-    da_debug_flag=`cat /sys/module/da_kmodule/parameters/da_debug_flag`
+    local_npages=`cat /sys/module/kmodule/parameters/local_npages`
+    bandwidth_bps=`cat /sys/module/kmodule/parameters/bandwidth_bps`
+    latency_ns=`cat /sys/module/kmodule/parameters/latency_ns`
+    da_debug_flag=`cat /sys/module/kmodule/parameters/da_debug_flag`
 }
 
 update_params() {
-    echo $local_start > /sys/module/da_kmodule/parameters/local_start
-    echo $local_end > /sys/module/da_kmodule/parameters/local_end
-    echo $bandwidth_bps > /sys/module/da_kmodule/parameters/bandwidth_bps
-    echo $latency_ns > /sys/module/da_kmodule/parameters/latency_ns
-    echo $da_debug_flag > /sys/module/da_kmodule/parameters/da_debug_flag
+    echo $local_npages > /sys/module/kmodule/parameters/local_npages
+    echo $bandwidth_bps > /sys/module/kmodule/parameters/bandwidth_bps
+    echo $latency_ns > /sys/module/kmodule/parameters/latency_ns
+    echo $da_debug_flag > /sys/module/kmodule/parameters/da_debug_flag
 }
 
 print_params() {
-    echo -e "    Local address start      : $local_start"
-    echo -e "    Local address end        : $local_end"
+    echo -e "    Number of local pages    : $local_npages"
     echo -e "    Bandwidth (bits-per-sec) : $bandwidth_bps"
     echo -e "    Latency (nano-sec)       : $latency_ns"
     printf  "    Debug flags              : %s\n" $(printf "%8s" $(echo "obase=2;$da_debug_flag" | bc) | tr ' ' '0')
@@ -65,12 +61,8 @@ while [[ $# -ge 1 ]]
 do
     key="$1"
     case $key in
-        -s|--localstart)
-            local_start="$2"
-            shift 2
-            ;;
-        -e|--localend)
-            local_end="$2"
+        -p|--pages)
+            local_npages="$2"
             shift 2
             ;;
         -b|--bandwidth)
