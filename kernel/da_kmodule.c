@@ -154,7 +154,7 @@ int do_page_fault_hook_start_new (struct pt_regs *regs,
             lpl_AddPage(current->mm, address);
             last_fault_addr = address;          // Remember this address for future
         } else {
-            DA_WARNING("Page fault on same page in series");
+            DA_WARNING("Page fault on same page in series; addr : %lu", address);
         }
     }
 
