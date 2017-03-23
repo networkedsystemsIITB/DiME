@@ -98,9 +98,25 @@ int ml_is_protected(struct mm_struct *mm, ulong address) {
     pte_t* ptep = ml_get_ptep(mm, address);
     if(ptep) {
         // Check if page fault IS induced by us
-        if ( (pte_flags(*ptep) & _PAGE_PROTNONE) && !(pte_flags(*ptep) & _PAGE_PRESENT) ) {
+        if ( (pte_flags(*ptep) & _PAGE_PROTNONE) ) {
             return 1;   // Success
         }
+    } else {
+        DA_WARNING("ptep is NULL");
+    }
+    
+    return 0;           // Failure
+}
+
+int ml_is_present(struct mm_struct *mm, ulong address) {
+    pte_t* ptep = ml_get_ptep(mm, address);
+    if(ptep) {
+        // Check if page fault IS induced by us
+        if ( (pte_flags(*ptep) & _PAGE_PRESENT) ) {
+            return 1;   // Success
+        }
+    } else {
+        DA_WARNING("ptep is NULL");
     }
     
     return 0;           // Failure

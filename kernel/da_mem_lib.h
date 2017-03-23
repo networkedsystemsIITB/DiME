@@ -21,5 +21,6 @@ void ml_protect_all_pages(struct mm_struct * mm);
 int ml_unprotect_page(struct mm_struct *mm, ulong address);
 int ml_protect_page(struct mm_struct *mm, ulong address);
 int ml_is_protected(struct mm_struct *mm, ulong address);
+int ml_is_present(struct mm_struct *mm, ulong address);
 
 #endif//__DA_MEM_LIB_H__

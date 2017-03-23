@@ -28,7 +28,7 @@ static ulong lpl_local_npages = 0;
 
 extern ulong local_npages;
 
-int lpl_initialize(ulong size) {
+/*int lpl_Initialize(ulong size) {
 	if (!lpl_local_pages) {
 		// TODO:: protect all pages first
 		kfree(lpl_local_pages);
@@ -45,7 +45,7 @@ int lpl_initialize(ulong size) {
 	} else {
 		return -ENOMEM;
 	}
-}
+}*/
 
 
 void lpl_AddPage(struct mm_struct * mm, ulong address) {
@@ -89,12 +89,12 @@ void lpl_AddPage(struct mm_struct * mm, ulong address) {
 		ml_protect_page(mm, addr);
 	}
 
-	/*list_for_each(lnode, &lpl_head) {
+	list_for_each(lnode, &lpl_head) {
 		if (list_entry(lnode, struct lpl_node_struct, list_node)->address == address) {
 			DA_WARNING("duplecate entry for address found in list : address = %lu", address);
 			break;
 		}
-	}*/
+	}
 
 	list_rotate_left(&lpl_head);
 	list_last_entry(&lpl_head, struct lpl_node_struct, list_node)->address = address;

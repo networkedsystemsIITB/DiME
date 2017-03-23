@@ -73,9 +73,9 @@ MODULE_AUTHOR("Abhishek Ghogare, Trishal Patel");
 MODULE_DESCRIPTION("Disaggregation Emulator");
 
 static int      pid             = 10;
-static ulong    latency_ns      = 1000ULL;
+static ulong    latency_ns      = 10000ULL;
 static ulong    bandwidth_bps   = 10000000000ULL;
-       ulong    local_npages    = 2000ULL;
+       ulong    local_npages    = 20ULL;
 
 module_param(pid, int, 0444);               // pid cannot be changed but read directly from sysfs
 module_param(latency_ns, ulong, 0644);
@@ -98,6 +98,7 @@ MODULE_PARM_DESC(local_npages, "Number of available local pages");
  */
 ulong *local_page_list = NULL;  // Circular list of local pages
 ulong local_last_page = 0;      // Head of the circular list
+ulong page_fault_count=0;
 
 
 
@@ -151,10 +152,26 @@ int do_page_fault_hook_start_new (struct pt_regs *regs,
 
         // Check if last faulted page is not same as current
         if(address != last_fault_addr) {
+        //if (ml_is_protected(current->mm, address)) { // TODO :: pages are not seen as protected, so add all the pages to list, problem is there might be duplecate entries in the local page list
+            if(ml_is_protected(current->mm, address)) {
+                DA_INFO("Protected page\t: yes : %lu", address);
+            } else {
+                DA_INFO("Protected page\t: no  : %lu", address);
+            }
+            if(ml_is_present(current->mm, address)) {
+                DA_INFO("Page present\t\t: yes : %lu", address);
+            } else {
+                DA_INFO("Page present\t\t: no  : %lu", address);
+            }
             lpl_AddPage(current->mm, address);
             last_fault_addr = address;          // Remember this address for future
-        } else {
-            DA_WARNING("Page fault on same page in series; addr : %lu", address);
+
+        } else { 
+            pte_t* ptep = ml_get_ptep(current->mm, address);
+            if(ptep) {
+                //DA_WARNING("Page fault on same page in series; addr : %lu", address);
+                //DA_WARNING("%lu %lu", pte_flags(*ptep) & _PAGE_PROTNONE , pte_flags(*ptep) & _PAGE_PRESENT);
+            }
         }
     }
 
@@ -173,12 +190,18 @@ int do_page_fault_hook_end_new (struct pt_regs *regs,
 
     if(current->pid == pid) {
         // Inject delays here
+        page_fault_count++;
+        DA_INFO("Page fault count : %lu", page_fault_count);
         DA_DEBUG("Waiting in delay");
+
+        delay_ns = 0;
         delay_ns = ((PAGE_SIZE * 8ULL) * 1000000000) / bandwidth_bps;   // Transmission delay
         delay_ns += 2*latency_ns;                                       // Two way latency
         while ((sched_clock() - timer_start) < delay_ns) {
             // Wait for delay
         }
+
+
     }
 
     return 0;
