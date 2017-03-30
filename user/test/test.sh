@@ -1,5 +1,11 @@
 #!/bin/bash
 
+# Module parameters :
+pid=100
+latency_ns=20000
+local_npages=10
+bandwidth_bps=10000000000000000
+
 echo never > /sys/kernel/mm/transparent_hugepage/enabled
 
 if [ "$#" -lt "1" ]
@@ -28,7 +34,9 @@ then
 fi
 
 echo "Inserting module.."
-insmod ../../kernel/kmodule.ko pid=$pid latency_ns=20000 local_npages=100 bandwidth_bps=1000000000
+expected_delay_per_fault_ms=$(bc -l <<< "scale=2; 2 * $latency_ns / 1000 + 4096 * 8 * 1000000 / $bandwidth_bps")
+echo "Expected delay per page fault : $expected_delay_per_fault_ms ms"
+insmod ../../kernel/kmodule.ko pid=$pid latency_ns=$latency_ns local_npages=$local_npages bandwidth_bps=$bandwidth_bps
 
 sudo pkill -USR1 test_prog
 

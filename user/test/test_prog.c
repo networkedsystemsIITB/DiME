@@ -5,7 +5,18 @@
 #include <time.h>
 
 char *pages = NULL;
-unsigned long long npages = 0;
+unsigned long long npages = 0, fault_count;
+
+unsigned long long get_page_fault_count() {
+	FILE *f = fopen("/sys/module/kmodule/parameters/page_fault_count", "r");
+	unsigned long long count;
+
+	fscanf(f, "%llu", &count);
+
+	fclose(f);
+
+	return count;
+}
 
 void start_test();
 
@@ -30,14 +41,19 @@ void access_all_data() {
 }
 void sequential_access_test() {
 	clock_t timer;
+	unsigned long long t;
 
 	// sequential access
+	fault_count = 0;
 	printf("Sequential : \n\tTime taken (ms) \t: ");
 	timer = clock();
 	access_all_data();
 	timer = clock() - timer;
 	printf("%lu\n", timer);
-	printf("\tPer page time (ms) \t: %llu\n\n", timer/npages);
+	fault_count = get_page_fault_count() - fault_count;
+	t = timer;
+	fault_count = t/fault_count;
+	printf("\tPer page fault (ms) \t: %llu\n\n", fault_count);
 }
 
 

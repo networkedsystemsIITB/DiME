@@ -81,12 +81,14 @@ static int      pid             = 10;
 static ulong    latency_ns      = 10000ULL;
 static ulong    bandwidth_bps   = 10000000000ULL;
        ulong    local_npages    = 20ULL;
+static ulong    page_fault_count= 0ULL;
 
 module_param(pid, int, 0444);               // pid cannot be changed but read directly from sysfs
 module_param(latency_ns, ulong, 0644);
 module_param(bandwidth_bps, ulong, 0644);
 module_param(da_debug_flag, uint, 0644);    // debug level flags, can be set from sysfs
-module_param(local_npages, ulong, 0644);    // number of local pages, acts as a cache for remote memory 
+module_param(local_npages, ulong, 0644);    // number of local pages, acts as a cache for remote memory
+module_param(page_fault_count, ulong, 0444);               // pid cannot be changed but read directly from sysfs 
 // TODO: unsigned long is 64bit in x86_64, need to change to ull
 
 MODULE_PARM_DESC(pid, "PID of a process to track");
@@ -94,6 +96,7 @@ MODULE_PARM_DESC(latency_ns, "One way latency in nano-sec");
 MODULE_PARM_DESC(bandwidth_bps, "Bandwidth of network in bits-per-sec");
 MODULE_PARM_DESC(da_debug_flag, "Module debug log level flags");
 MODULE_PARM_DESC(local_npages, "Number of available local pages");
+MODULE_PARM_DESC(page_fault_count, "Number of total page faults");
 
 
 /*****
@@ -103,7 +106,6 @@ MODULE_PARM_DESC(local_npages, "Number of available local pages");
  */
 ulong *local_page_list = NULL;  // Circular list of local pages
 ulong local_last_page = 0;      // Head of the circular list
-ulong page_fault_count=0;
 
 
 
@@ -201,21 +203,20 @@ int do_page_fault_hook_end_new (struct pt_regs *regs,
                             unsigned long address,
                             int * hook_flag) {
     ulong delay_ns;
+    //int count=0;
 
     // Check if hook_flag was set in start hook
     if(current->pid == pid && *hook_flag == 1) {
         // Inject delays here
         page_fault_count++;
-        DA_INFO("Page fault count : %lu", page_fault_count);
 
         delay_ns = 0;
-        delay_ns = ((PAGE_SIZE * 8ULL) * 1000000000) / bandwidth_bps;   // Transmission delay
+        delay_ns = ((PAGE_SIZE * 8ULL) * 1000000000ULL) / bandwidth_bps;   // Transmission delay
         delay_ns += 2*latency_ns;                                       // Two way latency
         while ((sched_clock() - timer_start) < delay_ns) {
             // Wait for delay
+            //count++;
         }
-
-
     }
 
     return 0;
