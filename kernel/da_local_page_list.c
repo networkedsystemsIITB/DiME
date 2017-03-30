@@ -91,7 +91,9 @@ void lpl_AddPage(struct mm_struct * mm, ulong address) {
 
 	list_for_each(lnode, &lpl_head) {
 		if (list_entry(lnode, struct lpl_node_struct, list_node)->address == address) {
+			pte_t* ptep = ml_get_ptep(current->mm, address);
 			DA_WARNING("duplecate entry for address found in list : address = %lu", address);
+			DA_WARNING(" flags : prot:%lu \tpresent:%lu \t\t%lu", pte_flags(*ptep) & _PAGE_PROTNONE , pte_flags(*ptep) & _PAGE_PRESENT, address);
 			break;
 		}
 	}

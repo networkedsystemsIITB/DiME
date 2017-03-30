@@ -50,16 +50,20 @@ unsigned int da_debug_flag =    DA_DEBUG_ALERT_FLAG |
 
 extern int (*HOOK_START_FN_NAME) (struct pt_regs *regs, 
                                     unsigned long error_code, 
-                                    unsigned long address);
+                                    unsigned long address,
+                                    int * hook_flag);
 extern int (*HOOK_END_FN_NAME) (struct pt_regs *regs, 
                                     unsigned long error_code, 
-                                    unsigned long address);
+                                    unsigned long address,
+                                    int * hook_flag);
 int do_page_fault_hook_start_new (struct pt_regs *regs, 
                                     unsigned long error_code, 
-                                    unsigned long address);
+                                    unsigned long address,
+                                    int * hook_flag);
 int do_page_fault_hook_end_new (struct pt_regs *regs, 
                                     unsigned long error_code, 
-                                    unsigned long address);
+                                    unsigned long address,
+                                    int * hook_flag);
 
 struct task_struct* get_task_by_pid(pid_t pid);
 
@@ -145,15 +149,19 @@ ulong last_fault_addr   = 0;
 ulong timer_start       = 0;
 int do_page_fault_hook_start_new (struct pt_regs *regs, 
                             unsigned long error_code, 
-                            unsigned long address) {
+                            unsigned long address,
+                            int * hook_flag) {
+
+            static pte_t ptep_old;
     if(current->pid == pid) {
+            pte_t* ptep = ml_get_ptep(current->mm, address);
         // Start timer now, to calculate page fetch delay later
         timer_start = sched_clock();
 
         // Check if last faulted page is not same as current
-        if(address != last_fault_addr) {
-        //if (ml_is_protected(current->mm, address)) { // TODO :: pages are not seen as protected, so add all the pages to list, problem is there might be duplecate entries in the local page list
-            if(ml_is_protected(current->mm, address)) {
+        //if(address != last_fault_addr) {
+        if (!ml_is_present(current->mm, address)) { // TODO :: pages are not seen as protected, so add all the pages to list, problem is there might be duplecate entries in the local page list
+            /*if(ml_is_protected(current->mm, address)) {
                 DA_INFO("Protected page\t: yes : %lu", address);
             } else {
                 DA_INFO("Protected page\t: no  : %lu", address);
@@ -162,17 +170,21 @@ int do_page_fault_hook_start_new (struct pt_regs *regs,
                 DA_INFO("Page present\t\t: yes : %lu", address);
             } else {
                 DA_INFO("Page present\t\t: no  : %lu", address);
-            }
+            }*/
+            //DA_WARNING("notsameas : prot:%lu \tpresent:%lu \t\t%lu", pte_flags(*ptep) & _PAGE_PROTNONE , pte_flags(*ptep) & _PAGE_PRESENT, address);
             lpl_AddPage(current->mm, address);
             last_fault_addr = address;          // Remember this address for future
+            *hook_flag = 1;                     // Set flag to execute delay in end hook
 
-        } else { 
-            pte_t* ptep = ml_get_ptep(current->mm, address);
+        } else {/*
             if(ptep) {
-                //DA_WARNING("Page fault on same page in series; addr : %lu", address);
-                //DA_WARNING("%lu %lu", pte_flags(*ptep) & _PAGE_PROTNONE , pte_flags(*ptep) & _PAGE_PRESENT);
-            }
+                DA_WARNING("old flags : prot:%lu \tpresent:%lu \t\t%lu", pte_flags(ptep_old) & _PAGE_PROTNONE , pte_flags(ptep_old) & _PAGE_PRESENT, address);
+                DA_WARNING("new flags : prot:%lu \tpresent:%lu \t\t%lu", pte_flags(*ptep) & _PAGE_PROTNONE , pte_flags(*ptep) & _PAGE_PRESENT, address);
+            }*/
+
+
         }
+            ptep_old = *ptep;
     }
 
     return 0;
@@ -185,14 +197,15 @@ int do_page_fault_hook_start_new (struct pt_regs *regs,
  */
 int do_page_fault_hook_end_new (struct pt_regs *regs, 
                             unsigned long error_code, 
-                            unsigned long address) {
+                            unsigned long address,
+                            int * hook_flag) {
     ulong delay_ns;
 
-    if(current->pid == pid) {
+    // Check if hook_flag was set in start hook
+    if(current->pid == pid && *hook_flag == 1) {
         // Inject delays here
         page_fault_count++;
         DA_INFO("Page fault count : %lu", page_fault_count);
-        DA_DEBUG("Waiting in delay");
 
         delay_ns = 0;
         delay_ns = ((PAGE_SIZE * 8ULL) * 1000000000) / bandwidth_bps;   // Transmission delay

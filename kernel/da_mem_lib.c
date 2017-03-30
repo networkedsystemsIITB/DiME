@@ -102,7 +102,7 @@ int ml_is_protected(struct mm_struct *mm, ulong address) {
             return 1;   // Success
         }
     } else {
-        DA_WARNING("ptep is NULL");
+        DA_WARNING("ptep is NULL; address : %lu", address);
     }
     
     return 0;           // Failure
@@ -116,7 +116,7 @@ int ml_is_present(struct mm_struct *mm, ulong address) {
             return 1;   // Success
         }
     } else {
-        DA_WARNING("ptep is NULL");
+        DA_WARNING("ptep is NULL; address : %lu", address);
     }
     
     return 0;           // Failure

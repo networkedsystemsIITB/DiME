@@ -33,3 +33,4 @@ insmod ../../kernel/kmodule.ko pid=$pid latency_ns=20000 local_npages=100 bandwi
 sudo pkill -USR1 test_prog
 
 wait $pid
+
