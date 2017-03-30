@@ -30,11 +30,12 @@ unsigned int da_debug_flag =    DA_DEBUG_ALERT_FLAG |
  *  e.g. :
  *      do_page_fault(struct pt_regs *regs, unsigned long error_code)
  *      {
- *          <start_hook>
+ *          int hook_flag = 0;
+ *          <start_hook with last argument as &hook_flag>
  *          .....
  *          __do_page_fault(regs, error_code, address);
  *          .....
- *          <end_hook>
+ *          <end_hook with last argument as &hook_flag>
  *      }
  *
  *  We are starting a timer in start hook function, and waiting in end hook
