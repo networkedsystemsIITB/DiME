@@ -22,10 +22,6 @@
 static LIST_HEAD(lpl_head);
 static ulong lpl_count = 0;
 
-static ulong *lpl_local_pages = NULL;
-static ulong lpl_lasti = 0;
-static ulong lpl_local_npages = 0;
-
 
 extern ulong local_npages;
 
@@ -75,7 +71,7 @@ int test_list(ulong address) {
 
 void lpl_AddPage(struct mm_struct * mm, ulong address) {
 	struct lpl_node_struct *node = NULL;
-	struct list_head *lnode = NULL;
+	//struct list_head *lnode = NULL;
 
 	while (local_npages < lpl_count) 
 	{

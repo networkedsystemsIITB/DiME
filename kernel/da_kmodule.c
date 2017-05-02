@@ -63,22 +63,26 @@ unsigned int da_debug_flag =    DA_DEBUG_ALERT_FLAG |
 #define HOOK_START_FN_NAME  do_page_fault_hook_start    // Called before __do_page_fault
 #define HOOK_END_FN_NAME    do_page_fault_hook_end      // Called after __do_page_fault
 
-extern int (*HOOK_START_FN_NAME) (struct pt_regs *regs, 
-                                    unsigned long error_code, 
-                                    unsigned long address,
-                                    int * hook_flag);
-extern int (*HOOK_END_FN_NAME) (struct pt_regs *regs, 
-                                    unsigned long error_code, 
-                                    unsigned long address,
-                                    int * hook_flag);
-int do_page_fault_hook_start_new (struct pt_regs *regs, 
-                                    unsigned long error_code, 
-                                    unsigned long address,
-                                    int * hook_flag);
-int do_page_fault_hook_end_new (struct pt_regs *regs, 
-                                    unsigned long error_code, 
-                                    unsigned long address,
-                                    int * hook_flag);
+extern int (*HOOK_START_FN_NAME) (struct pt_regs *  regs,
+                                    unsigned long   error_code,
+                                    unsigned long   address,
+                                    int *           hook_flag,
+                                    ulong *         hook_timestamp);
+extern int (*HOOK_END_FN_NAME) (struct pt_regs *    regs,
+                                    unsigned long   error_code,
+                                    unsigned long   address,
+                                    int *           hook_flag,
+                                    ulong *         hook_timestamp);
+int do_page_fault_hook_start_new (struct pt_regs *  regs,
+                                    unsigned long   error_code,
+                                    unsigned long   address,
+                                    int *           hook_flag,
+                                    ulong *         hook_timestamp);
+int do_page_fault_hook_end_new (struct pt_regs *    regs,
+                                    unsigned long   error_code,
+                                    unsigned long   address,
+                                    int *           hook_flag,
+                                    ulong *         hook_timestamp);
 
 struct task_struct* get_task_by_pid(pid_t pid);
 
@@ -111,17 +115,6 @@ MODULE_PARM_DESC(bandwidth_bps, "Bandwidth of network in bits-per-sec");
 MODULE_PARM_DESC(da_debug_flag, "Module debug log level flags");
 MODULE_PARM_DESC(local_npages, "Number of available local pages");
 MODULE_PARM_DESC(page_fault_count, "Number of total page faults");
-
-
-/*****
- *
- *  Local variables
- *
- */
-ulong *local_page_list = NULL;  // Circular list of local pages
-ulong local_last_page = 0;      // Head of the circular list
-
-
 
 
 /*****
@@ -163,19 +156,18 @@ void cleanup_module(void)
  *  Description:
  *      do_page_fault hook function
  */
-ulong last_fault_addr   = 0;
-ulong timer_start       = 0; //TODO:: move this variables inside do_page_fault
 int do_page_fault_hook_start_new (struct pt_regs *regs, 
                             unsigned long error_code, 
                             unsigned long address,
-                            int * hook_flag) {
+                            int * hook_flag,
+                            ulong * hook_timestamp) {
     if(current->pid == pid) {
         // Start timer now, to calculate page fetch delay later
-        timer_start = sched_clock();
+        *hook_timestamp = sched_clock();
 
         if (!ml_is_present(current->mm, address)) { // TODO :: pages are not seen as protected, so add all the pages to list, problem is there might be duplecate entries in the local page list
-            pte_t* ptep = ml_get_ptep(current->mm, address);
-            /*if (ptep)
+            /*pte_t* ptep = ml_get_ptep(current->mm, address);
+            if (ptep)
                 DA_WARNING("duplecate entry :: flags : prot:%-4lu present:%-4lu inlist:%-4lu %lu",
                                                     pte_flags(*ptep) & _PAGE_PROTNONE,
                                                     pte_flags(*ptep) & _PAGE_PRESENT,
@@ -200,7 +192,8 @@ int do_page_fault_hook_start_new (struct pt_regs *regs,
 int do_page_fault_hook_end_new (struct pt_regs *regs, 
                             unsigned long error_code, 
                             unsigned long address,
-                            int * hook_flag) {
+                            int * hook_flag,
+                            ulong * hook_timestamp) {
     ulong delay_ns;
     //int count=0;
 
@@ -214,7 +207,7 @@ int do_page_fault_hook_end_new (struct pt_regs *regs,
         delay_ns = 0;
         delay_ns = ((PAGE_SIZE * 8ULL) * 1000000000ULL) / bandwidth_bps;   // Transmission delay
         delay_ns += 2*latency_ns;                                       // Two way latency
-        while ((sched_clock() - timer_start) < delay_ns) {
+        while ((sched_clock() - *hook_timestamp) < delay_ns) {
             // Wait for delay
             //count++;
         }
