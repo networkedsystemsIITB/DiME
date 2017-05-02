@@ -12,6 +12,7 @@
 #include <linux/mm.h>
 #include <linux/list.h>
 #include <linux/slab.h>
+#include <asm/pgtable_types.h>
 
 #include "da_mem_lib.h"
 
@@ -46,7 +47,31 @@ extern ulong local_npages;
 		return -ENOMEM;
 	}
 }*/
+int test_list(ulong address) {
 
+	int location=0;
+	struct list_head *lnode = NULL;
+
+	location=0;
+	list_for_each(lnode, &lpl_head) {
+		location++;
+		if (list_entry(lnode, struct lpl_node_struct, list_node)->address == address) {
+			//break;
+			return location;
+		}
+	}
+
+	/*
+	pte_t* ptep = ml_get_ptep(current->mm, address);
+	//DA_WARNING(" for address found in list : address = %lu", address);
+	if (ptep)
+		DA_WARNING("inserted :: flags : prot:%-4lu present:%-4lu inlist:%-4lu %lu",
+											pte_flags(*ptep) & _PAGE_PROTNONE,
+											pte_flags(*ptep) & _PAGE_PRESENT,
+											pte_flags(*ptep) & _PAGE_SOFTW2,
+											address);*/
+	return 0;
+}
 
 void lpl_AddPage(struct mm_struct * mm, ulong address) {
 	struct lpl_node_struct *node = NULL;
@@ -54,19 +79,23 @@ void lpl_AddPage(struct mm_struct * mm, ulong address) {
 
 	while (local_npages < lpl_count) 
 	{
+		ulong addr;
 		struct list_head *first_node = lpl_head.next;
-		ml_protect_page(mm, list_entry(first_node, struct lpl_node_struct, list_node)->address);
+
+		addr = list_entry(first_node, struct lpl_node_struct, list_node)->address;
+		// ml_reset_inlist(mm, addr);
+		ml_protect_page(mm, addr);
 		list_del(first_node);
-		kfree(first_node);
+		kfree(first_node);	// TODO :: free not the list node, but container of list node
 		lpl_count--;
 		DA_INFO("remove extra local page, current count:%lu", lpl_count);
 	}
 
-	if (local_npages == 0) 
+	if (local_npages == 0)
 	{
 		// no need to add this address
 		return;
-	} 
+	}
 	else if (local_npages > lpl_count) 
 	{
 		node = (struct lpl_node_struct*) kmalloc(sizeof(struct lpl_node_struct), GFP_KERNEL);
@@ -76,8 +105,8 @@ void lpl_AddPage(struct mm_struct * mm, ulong address) {
 			list_add(&(node->list_node), &lpl_head);
 			lpl_count++;
 			DA_INFO("add extra local page, current count:%lu", lpl_count);
-		} 
-		else 
+		}
+		else
 		{
 			DA_ERROR("unable to allocate memory");
 			return;
@@ -86,20 +115,14 @@ void lpl_AddPage(struct mm_struct * mm, ulong address) {
 	else
 	{	// protect FIFO last address, so that it will be faulted in future
 		ulong addr = list_first_entry(&lpl_head, struct lpl_node_struct, list_node)->address;
+		// ml_reset_inlist(mm, addr);
 		ml_protect_page(mm, addr);
 	}
-/*
-	list_for_each(lnode, &lpl_head) {
-		if (list_entry(lnode, struct lpl_node_struct, list_node)->address == address) {
-			pte_t* ptep = ml_get_ptep(current->mm, address);
-			DA_WARNING("duplecate entry for address found in list : address = %lu", address);
-			DA_WARNING(" flags : prot:%lu \tpresent:%lu \t\t%lu", pte_flags(*ptep) & _PAGE_PROTNONE , pte_flags(*ptep) & _PAGE_PRESENT, address);
-			break;
-		}
-	}*/
+
 
 	list_rotate_left(&lpl_head);
 	list_last_entry(&lpl_head, struct lpl_node_struct, list_node)->address = address;
+	// ml_set_inlist(mm, address);
 	ml_unprotect_page(mm, address);		// no page fault for pages in list
 }
 

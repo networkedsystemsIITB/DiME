@@ -23,4 +23,8 @@ int ml_protect_page(struct mm_struct *mm, ulong address);
 int ml_is_protected(struct mm_struct *mm, ulong address);
 int ml_is_present(struct mm_struct *mm, ulong address);
 
+int ml_is_inlist(struct mm_struct *mm, ulong address);
+int ml_set_inlist(struct mm_struct *mm, ulong address);
+int ml_reset_inlist(struct mm_struct *mm, ulong address);
+
 #endif//__DA_MEM_LIB_H__

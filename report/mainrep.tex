@@ -1,0 +1,173 @@
+%%% Time-stamp: <mainrep.tex 19:57, 17 Jul 2016 by P Sunthar>
+%%% $Log:$
+% This document describes how to use iitbreport style
+%********************************************************************
+
+%\documentclass[11pt,a4paper,openright]{report}
+\documentclass[twoside]{iitbreport}
+
+%% Default spacing: 1.5
+%% Default font size: 12pt
+%% Default font: txfonts (similar to times new roman) 
+
+%% Selectively comment out sections that you want to be left out but
+%% maintaining the page numbers and other \ref
+\includeonly{%
+  intro/introduction,
+  assumption/assumption,
+  implementation/main,
+  lit/literature,
+  expt/experimental,
+  rnd/results, 
+  dec,abs,pub,ack
+}
+
+%%% Some commonly used packages (make sure your LaTeX installation
+%%% contains these packages, if not ask your senior to help installing
+%%% the packages)
+
+\usepackage{multirow}
+\usepackage{booktabs}
+\graphicspath{{expt/}}
+
+
+%%% Macro definitions for Commonly used symbols
+\newcommand{\Rey}{\ensuremath{\mathrm{Re}}}
+\newcommand{\avg}[1]{\ensuremath{\overline{#1}}}
+\newcommand{\tenpow}[1]{\ensuremath{\times 10^{#1}}}
+\newcommand{\pder}[2]{\ensuremath{\frac{\partial#1}{\partial#2}}}
+
+% Referencing macros
+\newcommand{\Eqref}[1]{Equation~\eqref{#1}}
+\newcommand{\Tabref}[1]{Table~\ref{#1}}
+\newcommand{\Figref}[1]{Figure~\ref{#1}}
+\newcommand{\Appref}[1]{Appendix~\ref{#1}}
+
+
+\begin{document}
+	
+%%********************************Frontmatter***********************
+% In frontmatter everything comes with roman numbering	
+\pagenumbering{roman}
+\setcounter{page}{1}
+
+%*******************************************************************
+%                         Title Page                            
+%*******************************************************************
+\title{Memory Disaggregation Emulator}
+\author{Abhishek Ghogare}
+
+%% Print the date. Today's date comes by default, change it here to 
+%% other date format, if required:
+
+%\date{\today}
+%\date{10 Mar 2016}
+
+
+%% The type of the report can be set here
+
+\reporttype{A R\&D Project Report}
+%\reporttype{A Thesis}
+%\reporttype{A Dissertation}
+%\reporttype{A Project Report}
+
+%% Name of the degree
+\degree{Master of Technology}
+%\degree{Master of Technology}
+
+
+%% Department/Centre Name
+\dept{Department of Computer Science and Engineering}
+
+%% Supervisor and cosupervisor/excosupervisor are not essential parts
+%% of a report title page, as it is your report!
+
+%% But if you **have** to put it uncomment these
+%\supervisor{Supervisor name}
+%\cosupervisor{Co-super name}
+%\excosupervisor{External Supervisor}
+
+%% Roll number
+\rollnum{Roll No. 153059006}
+
+\maketitle
+
+%*******************************************************************
+%                        Certificate Page                         
+%*******************************************************************
+%\makecertificate[change title name]{report type} 
+\makecertificate{R\&D report} 
+%\makecertificate{thesis}
+%\makecertificate{dissertation}
+%\makecertificate{project report}
+
+%\addintoc{Certificate}
+
+%*******************************************************************
+%                         Approval Sheet                         
+%*******************************************************************
+%\makeapproval{thesis}
+%\makeapproval{dissertation}
+
+%*******************************************************************
+%                          Declaration                           
+%*******************************************************************
+\include{dec} 
+%\addintoc{Declaration}
+
+%******************************************************************
+%                          Abstract                             
+%******************************************************************  
+\include{abs}                    
+
+%******************************************************************
+%                         Contents list                         
+%******************************************************************
+%\figurespagefalse
+%\tablespagefalse
+\makecontents % Creats toc, lof, and lot
+
+
+%%********************************Mainmatter***********************
+% In mainmatter everything comes with arabic numbering	
+\cleardoublepage
+\setcounter{page}{1}
+\pagenumbering{arabic}
+
+%******************************************************************
+%                         Chapters                           
+%****************************************************************** 
+\include{intro/introduction}
+\include{assumption/assumption}
+\include{implementation/main}
+%\include{expt/experimental}
+%\include{rnd/results}
+
+%******************************************************************
+%                         Bibliography or References          
+%******************************************************************  
+\bibliography{mylit}     
+
+%*******************************************************************
+%                         List of publications               
+%******************************************************************
+%\include{pub}            
+
+%*******************************************************************
+%                        Acknowledgements                    
+%******************************************************************* 
+\include{ack}           
+
+%*******************************************************************
+%                        About author                    
+%*******************************************************************
+%\colophon % remove this command while using this file.
+
+% GAME OVER
+%*******************************************************************
+\end{document}
+
+%%% Local Variables: 
+%%% mode: latex
+%%% TeX-master: t
+%%% End: 

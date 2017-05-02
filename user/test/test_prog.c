@@ -42,18 +42,21 @@ void access_all_data() {
 void sequential_access_test() {
 	clock_t timer;
 	unsigned long long t;
-
 	// sequential access
 	fault_count = 0;
 	printf("Sequential : \n\tTime taken (ms) \t: ");
 	timer = clock();
 	access_all_data();
+
+	//access_all_data();
+	//access_all_data();
 	timer = clock() - timer;
 	printf("%lu\n", timer);
 	fault_count = get_page_fault_count() - fault_count;
+	printf("\tTotal page faults \t: %llu\n", fault_count);
 	t = timer;
 	fault_count = t/fault_count;
-	printf("\tPer page fault (ms) \t: %llu\n\n", fault_count);
+	printf("\tTime per pagefault(ms) \t: %llu\n\n", fault_count);
 }
 
 

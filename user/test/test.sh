@@ -3,7 +3,7 @@
 # Module parameters :
 pid=100
 latency_ns=20000
-local_npages=10
+local_npages=1000
 bandwidth_bps=10000000000000000
 
 echo never > /sys/kernel/mm/transparent_hugepage/enabled

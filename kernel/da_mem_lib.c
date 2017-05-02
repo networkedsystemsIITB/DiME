@@ -11,6 +11,7 @@
 #include <linux/fs.h>
 #include <linux/mm.h>
 #include <linux/slab.h>
+#include <asm/pgtable_types.h>
 
 #include "da_mem_lib.h"
 
@@ -57,7 +58,8 @@ void ml_protect_all_pages(struct mm_struct * mm) {
 
         for (vma=mm->mmap ; vma ; vma=vma->vm_next) {
             for (vpage = vma->vm_start; vpage < vma->vm_end; vpage += PAGE_SIZE) {
-                DA_INFO("protecting page %lu", vpage);
+                DA_DEBUG("protecting page %lu", vpage);
+                // ml_set_inlist(mm, vpage);
             	ml_protect_page(mm, vpage);
             }
         }
@@ -68,7 +70,7 @@ void ml_protect_all_pages(struct mm_struct * mm) {
 
 int ml_protect_page(struct mm_struct *mm, ulong address) {
 	pte_t* ptep = ml_get_ptep(mm, address);
-	if(ptep && pte_present(*ptep)) {
+	if(ptep && pte_present(*ptep)) {       // TODO:: why check if present
 	    // Protect page "address"
 	    set_pte( ptep , pte_clear_flags(*ptep, _PAGE_PRESENT) );
 	    set_pte( ptep , pte_set_flags(*ptep, _PAGE_PROTNONE) );
@@ -80,17 +82,17 @@ int ml_protect_page(struct mm_struct *mm, ulong address) {
 
 int ml_unprotect_page(struct mm_struct *mm, ulong address) {
     pte_t* ptep = ml_get_ptep(mm, address);
-    if(ptep) {
+    if(ptep && pte_present(*ptep)) {
         // Check if page fault IS induced by us
-        if ( (pte_flags(*ptep) & _PAGE_PROTNONE) && !(pte_flags(*ptep) & _PAGE_PRESENT) ) {
+        //if ( (pte_flags(*ptep) & _PAGE_PROTNONE) && !(pte_flags(*ptep) & _PAGE_PRESENT) ) {
             //DA_INFO("page fault induced by clearing present bit %lu", address);
             // Clear protection of page "address"
             set_pte( ptep , pte_set_flags(*ptep, _PAGE_PRESENT) );
             set_pte( ptep , pte_clear_flags(*ptep, _PAGE_PROTNONE) );
             return 1;	// Success
-        }
+        //}
     }
-    
+
     return 0;			// Failure
 }
 
@@ -117,6 +119,40 @@ int ml_is_present(struct mm_struct *mm, ulong address) {
         }
     } else {
         DA_WARNING("ptep is NULL; address : %lu", address);
+    }
+    
+    return 0;           // Failure
+}
+
+int ml_is_inlist(struct mm_struct *mm, ulong address) {
+    pte_t* ptep = ml_get_ptep(mm, address);
+    if(ptep) {
+        // Check if page fault IS induced by us
+        if ( (pte_flags(*ptep) & _PAGE_SOFTW2) ) {
+            return 1;   // Success
+        }
+    } else {
+        DA_WARNING("ptep is NULL; address : %lu", address);
+    }
+    
+    return 0;           // Failure
+}
+
+int ml_set_inlist(struct mm_struct *mm, ulong address) {
+    pte_t* ptep = ml_get_ptep(mm, address);
+    if(ptep && pte_present(*ptep)) {
+        set_pte( ptep , pte_set_flags(*ptep, _PAGE_SOFTW2) );
+        return 1;   // Success
+    }
+
+    return 0;       // Failure
+}
+
+int ml_reset_inlist(struct mm_struct *mm, ulong address) {
+    pte_t* ptep = ml_get_ptep(mm, address);
+    if(ptep && pte_present(*ptep)) {
+        set_pte( ptep , pte_clear_flags(*ptep, _PAGE_SOFTW2) );
+        return 1;   // Success
     }
     
     return 0;           // Failure

@@ -7,6 +7,7 @@ struct lpl_node_struct {
 	ulong address;
 };
 
+int test_list(ulong address);
 void lpl_AddPage(struct mm_struct * mm, ulong address);
 void lpl_CleanList(void);
 

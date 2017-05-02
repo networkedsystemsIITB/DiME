@@ -27,15 +27,29 @@ unsigned int da_debug_flag =    DA_DEBUG_ALERT_FLAG |
  *
  *  Two hooks are required to set up in do_page_fault function in fault.c,
  *  one at the start of the function and other at the end of the function.
- *  e.g. :
+ *  e.g. : fault.c file looks like this
+ *
+ *      int do_page_fault_hook_start (struct pt_regs *regs, 
+ *                                          unsigned long error_code, 
+ *                                          unsigned long address,
+ *                                          int * hook_flag);
+ *      int do_page_fault_hook_end (struct pt_regs *regs, 
+ *                                          unsigned long error_code, 
+ *                                          unsigned long address,
+ *                                          int * hook_flag);
+ *          .....
+ *          .....
+ *
  *      do_page_fault(struct pt_regs *regs, unsigned long error_code)
  *      {
  *          int hook_flag = 0;
- *          <start_hook with last argument as &hook_flag>
+ *          if(do_page_fault_hook_start != NULL)
+ *              do_page_fault_hook_start(regs, error_code, address, &hook_flag);
  *          .....
  *          __do_page_fault(regs, error_code, address);
  *          .....
- *          <end_hook with last argument as &hook_flag>
+ *          if(do_page_fault_hook_end != NULL)
+ *              do_page_fault_hook_end(regs, error_code, address, &hook_flag);
  *      }
  *
  *  We are starting a timer in start hook function, and waiting in end hook
@@ -129,6 +143,7 @@ int init_module(void)
     DA_INFO("clearing pages");
     ts = get_task_by_pid(pid);              // Get task struct of tracking pid
     ml_protect_all_pages(ts->mm);           // Set protected bit for all pages
+
     DA_EXIT();
     return 0;    // Non-zero return means that the module couldn't be loaded.
 }
@@ -149,45 +164,29 @@ void cleanup_module(void)
  *      do_page_fault hook function
  */
 ulong last_fault_addr   = 0;
-ulong timer_start       = 0;
+ulong timer_start       = 0; //TODO:: move this variables inside do_page_fault
 int do_page_fault_hook_start_new (struct pt_regs *regs, 
                             unsigned long error_code, 
                             unsigned long address,
                             int * hook_flag) {
-
-            static pte_t ptep_old;
     if(current->pid == pid) {
-            pte_t* ptep = ml_get_ptep(current->mm, address);
         // Start timer now, to calculate page fetch delay later
         timer_start = sched_clock();
 
-        // Check if last faulted page is not same as current
-        //if(address != last_fault_addr) {
         if (!ml_is_present(current->mm, address)) { // TODO :: pages are not seen as protected, so add all the pages to list, problem is there might be duplecate entries in the local page list
-            /*if(ml_is_protected(current->mm, address)) {
-                DA_INFO("Protected page\t: yes : %lu", address);
-            } else {
-                DA_INFO("Protected page\t: no  : %lu", address);
-            }
-            if(ml_is_present(current->mm, address)) {
-                DA_INFO("Page present\t\t: yes : %lu", address);
-            } else {
-                DA_INFO("Page present\t\t: no  : %lu", address);
-            }*/
-            //DA_WARNING("notsameas : prot:%lu \tpresent:%lu \t\t%lu", pte_flags(*ptep) & _PAGE_PROTNONE , pte_flags(*ptep) & _PAGE_PRESENT, address);
-            lpl_AddPage(current->mm, address);
-            last_fault_addr = address;          // Remember this address for future
+            pte_t* ptep = ml_get_ptep(current->mm, address);
+            /*if (ptep)
+                DA_WARNING("duplecate entry :: flags : prot:%-4lu present:%-4lu inlist:%-4lu %lu",
+                                                    pte_flags(*ptep) & _PAGE_PROTNONE,
+                                                    pte_flags(*ptep) & _PAGE_PRESENT,
+                                                    pte_flags(*ptep) & _PAGE_SOFTW2,
+                                                    address);
+            else
+                DA_WARNING("duplecate entry :: ptep entry is null");*/
+
             *hook_flag = 1;                     // Set flag to execute delay in end hook
-
-        } else {/*
-            if(ptep) {
-                DA_WARNING("old flags : prot:%lu \tpresent:%lu \t\t%lu", pte_flags(ptep_old) & _PAGE_PROTNONE , pte_flags(ptep_old) & _PAGE_PRESENT, address);
-                DA_WARNING("new flags : prot:%lu \tpresent:%lu \t\t%lu", pte_flags(*ptep) & _PAGE_PROTNONE , pte_flags(*ptep) & _PAGE_PRESENT, address);
-            }*/
-
-
+            lpl_AddPage(current->mm, address);
         }
-            ptep_old = *ptep;
     }
 
     return 0;
@@ -206,8 +205,10 @@ int do_page_fault_hook_end_new (struct pt_regs *regs,
     //int count=0;
 
     // Check if hook_flag was set in start hook
-    if(current->pid == pid && *hook_flag == 1) {
+    if(current->pid == pid && *hook_flag != 0) {
         // Inject delays here
+        // ml_set_inlist(current->mm, address);
+        ml_unprotect_page(current->mm, address);     // no page fault for pages in list
         page_fault_count++;
 
         delay_ns = 0;

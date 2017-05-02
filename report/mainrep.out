@@ -1,0 +1,33 @@
+\BOOKMARK [0][-]{section*.4}{Abstract}{}% 1
+\BOOKMARK [0][-]{Table of Contents.0}{Table of Contents}{}% 2
+\BOOKMARK [0][-]{section*.7}{List of Figures}{}% 3
+\BOOKMARK [0][-]{section*.9}{List of Tables}{}% 4
+\BOOKMARK [0][-]{chapter.1}{Introduction}{}% 5
+\BOOKMARK [0][-]{chapter.2}{Architecture Assumptions}{}% 6
+\BOOKMARK [0][-]{chapter.3}{Implementation}{}% 7
+\BOOKMARK [1][-]{section.3.1}{Overall Design}{chapter.3}% 8
+\BOOKMARK [1][-]{section.3.2}{Memory Management in Linux}{chapter.3}% 9
+\BOOKMARK [1][-]{section.3.3}{Emulator Workflow}{chapter.3}% 10
+\BOOKMARK [1][-]{section.3.4}{Induce Page Faults}{chapter.3}% 11
+\BOOKMARK [1][-]{section.3.5}{Intercept a Kernel Function}{chapter.3}% 12
+\BOOKMARK [2][-]{subsection.3.5.1}{KProbe}{section.3.5}% 13
+\BOOKMARK [2][-]{subsection.3.5.2}{Kernel hooks}{section.3.5}% 14
+\BOOKMARK [1][-]{section.3.6}{Delay Execution}{chapter.3}% 15
+\BOOKMARK [2][-]{subsection.3.6.1}{PID of faulted process}{section.3.6}% 16
+\BOOKMARK [2][-]{subsection.3.6.2}{Virtual memory location}{section.3.6}% 17
+\BOOKMARK [1][-]{section.3.7}{Second Hook}{chapter.3}% 18
+\BOOKMARK [2][-]{subsection.3.7.1}{Accurate delay execution}{section.3.7}% 19
+\BOOKMARK [2][-]{subsection.3.7.2}{Delay execution decision}{section.3.7}% 20
+\BOOKMARK [1][-]{section.3.8}{Tyeps of Page Faults}{chapter.3}% 21
+\BOOKMARK [2][-]{subsection.3.8.1}{Minor Page Faults}{section.3.8}% 22
+\BOOKMARK [2][-]{subsection.3.8.2}{Demand paging}{section.3.8}% 23
+\BOOKMARK [2][-]{subsection.3.8.3}{Swap-in Pages}{section.3.8}% 24
+\BOOKMARK [0][-]{chapter.4}{Verification of Correctness}{}% 25
+\BOOKMARK [0][-]{chapter.5}{Future Work}{}% 26
+\BOOKMARK [1][-]{section.5.1}{Fast local page list lookup}{chapter.5}% 27
+\BOOKMARK [1][-]{section.5.2}{Local page replacement policy}{chapter.5}% 28
+\BOOKMARK [1][-]{section.5.3}{Fine grained control}{chapter.5}% 29
+\BOOKMARK [1][-]{section.5.4}{Support for huge pages}{chapter.5}% 30
+\BOOKMARK [1][-]{section.5.5}{Process groups}{chapter.5}% 31
+\BOOKMARK [0][-]{section*.11}{References}{}% 32
+\BOOKMARK [0][-]{section*.12}{Acknowledgements}{}% 33
