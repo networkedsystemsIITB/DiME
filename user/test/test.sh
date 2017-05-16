@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# Change pwd to script path
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd $DIR
+
 # Module parameters :
 pid=100
 latency_ns=20000
