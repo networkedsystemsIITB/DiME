@@ -16,6 +16,7 @@
 
 #include "da_mem_lib.h"
 #include "da_local_page_list.h"
+#include "da_ptracker.h"
 
 unsigned int da_debug_flag =    DA_DEBUG_ALERT_FLAG | 
                                 DA_DEBUG_INFO_FLAG | 
@@ -92,7 +93,7 @@ struct task_struct* get_task_by_pid(pid_t pid);
  *
  */
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Abhishek Ghogare, Trishal Patel");
+MODULE_AUTHOR("Abhishek Ghogare, Dhantu");
 MODULE_DESCRIPTION("Disaggregation Emulator");
 
 static int      pid             = 10;
@@ -126,16 +127,25 @@ MODULE_PARM_DESC(page_fault_count, "Number of total page faults");
  */
 int init_module(void)
 {
-    struct task_struct *ts;
     DA_ENTRY();
 
     HOOK_START_FN_NAME  = do_page_fault_hook_start_new;
     HOOK_END_FN_NAME    = do_page_fault_hook_end_new;
     DA_INFO("hook insertion complete, tracking on %d", pid);
 
+    if (pt_init_ptracker(pid) != 0) {
+        goto init_reset_hook;
+    }
+
     DA_INFO("clearing pages");
-    ts = get_task_by_pid(pid);              // Get task struct of tracking pid
-    ml_protect_all_pages(ts->mm);           // Set protected bit for all pages
+    pt_add_pid(pid);
+    goto init_good;
+
+init_reset_hook:
+    HOOK_START_FN_NAME  = NULL;
+    HOOK_END_FN_NAME    = NULL;
+
+init_good:
 
     DA_EXIT();
     return 0;    // Non-zero return means that the module couldn't be loaded.
@@ -143,8 +153,10 @@ int init_module(void)
 void cleanup_module(void)
 {
     DA_ENTRY();
+    // TODO:: Unprotect all pages before exiting
     HOOK_START_FN_NAME  = NULL; 
     HOOK_END_FN_NAME    = NULL;                    // Removing hook, setting to NULL
+    pt_exit_ptracker();
     lpl_CleanList();
     DA_INFO("cleaning up module complete");
     DA_EXIT();
@@ -214,24 +226,4 @@ int do_page_fault_hook_end_new (struct pt_regs *regs,
     }
 
     return 0;
-}
-
-
-/*  get_task_by_pid
- *
- *  Description:
- *      Returns task_struct corresponding to a process with given pid
- */
-struct task_struct* get_task_by_pid(pid_t pid) {
-    struct task_struct *ts = NULL;
-    DA_ENTRY();
-
-    for_each_process (ts) {
-        if (ts->pid == pid) {
-            return ts;
-        }
-    }
-
-    DA_EXIT();
-    return NULL;
 }
