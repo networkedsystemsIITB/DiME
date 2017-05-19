@@ -173,9 +173,12 @@ int do_page_fault_hook_start_new (struct pt_regs *regs,
                             unsigned long address,
                             int * hook_flag,
                             ulong * hook_timestamp) {
-    if(current->pid == pid) {
+    *hook_flag = 0;
+    
+    if(pt_find(current->pid) >= 0) {
         // Start timer now, to calculate page fetch delay later
         *hook_timestamp = sched_clock();
+
 
         if (!ml_is_present(current->mm, address)) { // TODO :: pages are not seen as protected, so add all the pages to list, problem is there might be duplecate entries in the local page list
             /*pte_t* ptep = ml_get_ptep(current->mm, address);
@@ -188,6 +191,7 @@ int do_page_fault_hook_start_new (struct pt_regs *regs,
             else
                 DA_WARNING("duplecate entry :: ptep entry is null");*/
 
+            DA_INFO("pt_find %d: %d", current->pid, pt_find(current->pid));
             *hook_flag = 1;                     // Set flag to execute delay in end hook
             lpl_AddPage(current->mm, address);
         }
@@ -210,7 +214,7 @@ int do_page_fault_hook_end_new (struct pt_regs *regs,
     //int count=0;
 
     // Check if hook_flag was set in start hook
-    if(current->pid == pid && *hook_flag != 0) {
+    if(*hook_flag != 0) {
         // Inject delays here
         // ml_set_inlist(current->mm, address);
         ml_unprotect_page(current->mm, address);     // no page fault for pages in list

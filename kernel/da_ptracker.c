@@ -101,13 +101,13 @@ int __pt_add(struct pid_list *pl, pid_t pid) {
     DA_INFO("process added to tracking list : pid:%d", pid);
 
     // DEBUG
-    {
+/*    {
         int i;
         DA_INFO("Printing pid list : ");
         for(i=0 ; i<pl->size ; ++i) {
             DA_INFO("\t%d", pl->list[i]);
         }
-    }
+    }*/
 
     return 0;
 }
