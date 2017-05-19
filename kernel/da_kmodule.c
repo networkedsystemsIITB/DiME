@@ -133,12 +133,12 @@ int init_module(void)
     HOOK_END_FN_NAME    = do_page_fault_hook_end_new;
     DA_INFO("hook insertion complete, tracking on %d", pid);
 
-    if (pt_init_ptracker(pid) != 0) {
+    if (pt_init_ptracker() != 0) {
         goto init_reset_hook;
     }
 
     DA_INFO("clearing pages");
-    pt_add_pid(pid);
+    pt_add_children(pid);
     goto init_good;
 
 init_reset_hook:

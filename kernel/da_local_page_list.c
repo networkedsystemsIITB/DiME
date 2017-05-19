@@ -100,7 +100,7 @@ void lpl_AddPage(struct mm_struct * mm, ulong address) {
 		{
 			list_add(&(node->list_node), &lpl_head);
 			lpl_count++;
-			DA_INFO("add extra local page, current count:%lu", lpl_count);
+			//DA_INFO("add extra local page, current count:%lu", lpl_count);
 		}
 		else
 		{
@@ -129,7 +129,7 @@ void lpl_CleanList() {
 		ulong addr = 0;
 		struct list_head *first_node = lpl_head.next;
 		addr = list_entry(first_node, struct lpl_node_struct, list_node)->address;
-		DA_INFO("removing from local mem : address:%lu", addr);
+		//DA_INFO("removing from local mem : address:%lu", addr);
 		list_del(first_node);
 		kfree(first_node);
 	}
