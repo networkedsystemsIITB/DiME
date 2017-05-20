@@ -55,7 +55,7 @@ void sequential_access_test() {
 	fault_count = get_page_fault_count() - fault_count;
 	printf("\tTotal page faults \t: %llu\n", fault_count);
 	t = timer;
-	fault_count = t/fault_count;
+	fault_count = t/(fault_count==0?1:fault_count);
 	printf("\tTime per pagefault(ms) \t: %llu\n\n", fault_count);
 }
 
