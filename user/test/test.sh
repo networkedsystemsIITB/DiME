@@ -1,8 +1,7 @@
 #!/bin/bash
 
 # Change pwd to script path
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-cd $DIR
+SCRIPT_PATH="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 # Module parameters :
 pid=100
@@ -18,7 +17,7 @@ then
 	exit 1
 fi
 
-./test_prog $1 &
+$SCRIPT_PATH/test_prog $1 &
 
 echo "[NOTE] Press enter to send the test program a signal to start testing..."
 read r
@@ -40,7 +39,7 @@ fi
 echo "Inserting module.."
 expected_delay_per_fault_ms=$(bc -l <<< "scale=2; 2 * $latency_ns / 1000 + 4096 * 8 * 1000000 / $bandwidth_bps")
 echo "Expected delay per page fault : $expected_delay_per_fault_ms ms"
-insmod ../../kernel/kmodule.ko pid=$pid latency_ns=$latency_ns local_npages=$local_npages bandwidth_bps=$bandwidth_bps
+insmod $SCRIPT_PATH/../../kernel/kmodule.ko pid=$pid latency_ns=$latency_ns local_npages=$local_npages bandwidth_bps=$bandwidth_bps
 
 sudo pkill -USR1 test_prog
 
