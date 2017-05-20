@@ -58,6 +58,13 @@ int __pt_add(struct pid_list *pl, pid_t pid) {
         return -ESRCH;   /* No such process */
     }
 
+    task = pid_task(pid_struct, PIDTYPE_PID);
+    if(!task) {
+        DA_ERROR("could not find task_struct for PID:%d", pid);
+        return -ESRCH;   /* No such process */
+    }
+
+
     if(!pl->list) {
         pl->max_size = PID_LIST_PART_SIZE;
         pl->size = 0;
@@ -91,12 +98,6 @@ int __pt_add(struct pid_list *pl, pid_t pid) {
             cmp_pid_t,
             swap_pid_t);
 
-    task = pid_task(pid_struct, PIDTYPE_PID);
-    if(!task) {
-        DA_ERROR("could not find task_struct for PID:%d", pid);
-        return -ESRCH;   /* No such process */
-    }
-
     ml_protect_all_pages(task->mm);
     DA_INFO("process added to tracking list : pid:%d", pid);
 
@@ -117,22 +118,37 @@ int pt_add(pid_t pid) {
 }
 
 // Add parent pid and all the children pids to tracking list
-void pt_add_children(pid_t ppid) {
+int pt_add_children(pid_t ppid) {
     struct list_head * p;
+    struct pid *pid_struct = NULL;
     struct task_struct *ts, *tsk;
     pid_t tmp_pid;
 
     if(pt_find(ppid) < 0) {
-        pt_add(ppid);
+        int retval = pt_add(ppid);
+        if(retval!=0)
+            return retval;
     }
 
-    ts = pid_task(find_get_pid(ppid), PIDTYPE_PID);
+    pid_struct = find_get_pid(ppid);
+    if(!pid_struct) {
+        DA_ERROR("could not find struct pid for PID:%d", ppid);
+        return -ESRCH;   /* No such process */
+    }
+
+    ts = pid_task(pid_struct, PIDTYPE_PID);
+    if(!ts) {
+        DA_ERROR("could not find task_struct for PID:%d", ppid);
+        return -ESRCH;   /* No such process */
+    }
 
     list_for_each(p, &(ts->children)){
         tsk = list_entry(p, struct task_struct, sibling);
         tmp_pid = tsk->pid;
         pt_add_children(tmp_pid);
     }
+
+    return 0;
 }
 
 
@@ -181,6 +197,12 @@ int pt_init_ptracker(void) {
 }
 
 void pt_exit_ptracker(void) {
+    DA_INFO("unregistering wake_up_new_task jprobe at %p...", jprobe_wake_up_new_task_struct.kp.addr);
     unregister_jprobe(&jprobe_wake_up_new_task_struct);
-    DA_INFO("unregistered wake_up_new_task jprobe at %p", jprobe_wake_up_new_task_struct.kp.addr);
+
+    DA_INFO("cleaning pid list...");
+    if(pid_list_s.list)
+        vfree(pid_list_s.list);
+
+    DA_INFO("cleaning process tracker complete");
 }
