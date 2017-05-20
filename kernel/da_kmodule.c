@@ -191,9 +191,8 @@ int do_page_fault_hook_start_new (struct pt_regs *regs,
             else
                 DA_WARNING("duplecate entry :: ptep entry is null");*/
 
-            DA_INFO("pt_find %d: %d", current->pid, pt_find(current->pid));
-            *hook_flag = 1;                     // Set flag to execute delay in end hook
-            lpl_AddPage(current->mm, address);
+            if(lpl_AddPage(current->mm, address) == 1)
+                *hook_flag = 1;                     // Set flag to execute delay in end hook
         }
     }
 

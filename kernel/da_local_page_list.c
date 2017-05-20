@@ -69,8 +69,9 @@ int test_list(ulong address) {
 	return 0;
 }
 
-void lpl_AddPage(struct mm_struct * mm, ulong address) {
+int lpl_AddPage(struct mm_struct * mm, ulong address) {
 	struct lpl_node_struct *node = NULL;
+	int ret_execute_delay = 0;
 	//struct list_head *lnode = NULL;
 
 	while (local_npages < lpl_count) 
@@ -90,10 +91,14 @@ void lpl_AddPage(struct mm_struct * mm, ulong address) {
 	if (local_npages == 0)
 	{
 		// no need to add this address
-		return;
+		// we can treat this case as infinite local pages, and no need to inject delay on any of the page
+		ret_execute_delay = 0;
+		return ret_execute_delay;
 	}
 	else if (local_npages > lpl_count) 
 	{
+		// Since there is still free space locally for remote pages, delay should not be injected
+		ret_execute_delay = 0;
 		node = (struct lpl_node_struct*) kmalloc(sizeof(struct lpl_node_struct), GFP_KERNEL);
 
 		if(node) 
@@ -105,14 +110,17 @@ void lpl_AddPage(struct mm_struct * mm, ulong address) {
 		else
 		{
 			DA_ERROR("unable to allocate memory");
-			return;
+			return ret_execute_delay;
 		}
 	}
 	else
-	{	// protect FIFO last address, so that it will be faulted in future
+	{	
+		// protect FIFO last address, so that it will be faulted in future
 		ulong addr = list_first_entry(&lpl_head, struct lpl_node_struct, list_node)->address;
 		// ml_reset_inlist(mm, addr);
 		ml_protect_page(mm, addr);
+		// Since local pages are occupied, delay should be injected
+		ret_execute_delay = 1;
 	}
 
 
@@ -120,6 +128,8 @@ void lpl_AddPage(struct mm_struct * mm, ulong address) {
 	list_last_entry(&lpl_head, struct lpl_node_struct, list_node)->address = address;
 	// ml_set_inlist(mm, address);
 	ml_unprotect_page(mm, address);		// no page fault for pages in list
+
+	return ret_execute_delay;
 }
 
 void lpl_CleanList() {
