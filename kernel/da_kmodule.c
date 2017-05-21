@@ -175,7 +175,7 @@ int do_page_fault_hook_start_new (struct pt_regs *regs,
                             ulong * hook_timestamp) {
     *hook_flag = 0;
     
-    if(pt_find(current->pid) >= 0) {
+    if(pt_find(current->tgid) >= 0) {
         // Start timer now, to calculate page fetch delay later
         *hook_timestamp = sched_clock();
 
