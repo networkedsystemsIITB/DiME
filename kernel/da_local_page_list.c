@@ -127,7 +127,7 @@ int lpl_AddPage(struct mm_struct * mm, ulong address) {
 	list_rotate_left(&lpl_head);
 	list_last_entry(&lpl_head, struct lpl_node_struct, list_node)->address = address;
 	// ml_set_inlist(mm, address);
-	ml_unprotect_page(mm, address);		// no page fault for pages in list
+	// ml_unprotect_page(mm, address);		// no page fault for pages in list // might be reason for crash, bad swap entry
 
 	return ret_execute_delay;
 }
