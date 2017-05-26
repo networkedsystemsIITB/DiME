@@ -11,8 +11,8 @@ fi
 
 # Module parameters :
 pid=100
-latency_ns=40000
-local_npages=20
+latency_ns=10000
+local_npages=1000
 bandwidth_bps=10000000000000000
 
 echo never > /sys/kernel/mm/transparent_hugepage/enabled
@@ -30,6 +30,8 @@ start_time_ns=`date +%s%N`
 eval $1 &
 
 pid=$!
+#ps aux | grep test_prog 
+pstree -ps `ps aux | grep "test_prog" | grep -v "/bin/bash" | awk '{print $2;}' | head -n1`
 #pid=$(ps | grep test_prog | awk '{print $1;}')
 if [ "$pid" == "" ]
 then
