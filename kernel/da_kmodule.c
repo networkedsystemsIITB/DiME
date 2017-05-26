@@ -10,6 +10,10 @@
 #include <linux/stat.h>
 #include <linux/fs.h>
 #include <linux/mm.h>
+#include <linux/version.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0)
+#include <linux/sched/clock.h>
+#endif
 
 
 #include "../common/da_debug.h"
@@ -216,7 +220,7 @@ int do_page_fault_hook_end_new (struct pt_regs *regs,
     if(*hook_flag != 0) {
         // Inject delays here
         // ml_set_inlist(current->mm, address);
-        ml_unprotect_page(current->mm, address);     // no page fault for pages in list
+        // ml_unprotect_page(current->mm, address);     // no page fault for pages in list // might be reason for crash, bad swap entry
         page_fault_count++;
 
         delay_ns = 0;

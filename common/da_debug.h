@@ -38,28 +38,28 @@ extern unsigned int da_debug_flag;
 #define DA_ENTRY()                                                                      \
 do {                                                                                    \
     if (da_debug_flag & DA_DEBUG_ENTRYEXIT_FLAG) {                                      \
-        PRINT_LOG(LOG_INFO,"[ENTRY] :%s:%d\t: ", __FUNCTION__,__LINE__);                \
+        PRINT_LOG(LOG_INFO,"[ENTRY] :%30s:%4d : ", __FUNCTION__,__LINE__);                \
     }                                                                                   \
 } while(0)
 
 #define DA_EXIT()                                                                       \
 do {                                                                                    \
     if (da_debug_flag & DA_DEBUG_ENTRYEXIT_FLAG) {                                      \
-        PRINT_LOG(LOG_INFO,"[EXIT]  :%s:%d\t: ", __FUNCTION__,__LINE__);                \
+        PRINT_LOG(LOG_INFO,"[EXIT]  :%30s:%4d : ", __FUNCTION__,__LINE__);                \
     }                                                                                   \
 } while(0)
 
 #define DA_DEBUG(msg, args...)                                                          \
 do {                                                                                    \
     if (da_debug_flag & DA_DEBUG_DEBUG_FLAG) {                                               \
-        PRINT_LOG(LOG_INFO,"[DEBUG] :%s:%d\t: " msg, __FUNCTION__,__LINE__, ##args);    \
+        PRINT_LOG(LOG_INFO,"[DEBUG] :%30s:%4d : " msg, __FUNCTION__,__LINE__, ##args);    \
     }                                                                                   \
 } while(0)
 
 #define DA_INFO(msg, args...)                                                           \
 do {                                                                                    \
     if (da_debug_flag & DA_DEBUG_INFO_FLAG) {                                           \
-        PRINT_LOG(LOG_INFO,"[INFO]  :%s:%d\t: " msg, __FUNCTION__,__LINE__, ##args);    \
+        PRINT_LOG(LOG_INFO,"[INFO]  :%30s:%4d : " msg, __FUNCTION__,__LINE__, ##args);    \
     }                                                                                   \
 } while(0)
 
@@ -67,21 +67,21 @@ do {                                                                            
 #define DA_WARNING(msg, args...)                                                        \
 do {                                                                                    \
     if (da_debug_flag & DA_DEBUG_WARNING_FLAG) {                                        \
-        PRINT_LOG(LOG_WARNING,"[WARN]  :%s:%d\t: " msg, __FUNCTION__,__LINE__, ##args); \
+        PRINT_LOG(LOG_WARNING,"[WARN]  :%30s:%4d : " msg, __FUNCTION__,__LINE__, ##args); \
     }                                                                                   \
 } while(0)
 
 #define DA_ERROR(msg, args...)                                                          \
 do {                                                                                    \
     if (da_debug_flag & DA_DEBUG_ERROR_FLAG) {                                          \
-        PRINT_LOG(LOG_ERR,"[ERR]   :%s:%d\t: " msg, __FUNCTION__,__LINE__, ##args);     \
+        PRINT_LOG(LOG_ERR,"[ERR]   :%30s:%4d : " msg, __FUNCTION__,__LINE__, ##args);     \
     }                                                                                   \
 } while(0)
 
 #define DA_ALERT(msg, args...)                                                          \
 do {                                                                                    \
     if (da_debug_flag & DA_DEBUG_ALERT_FLAG) {                                          \
-        PRINT_LOG(LOG_ALERT,"[ALERT] :%s:%d\t: " msg, __FUNCTION__,__LINE__, ##args);   \
+        PRINT_LOG(LOG_ALERT,"[ALERT] :%30s:%4d : " msg, __FUNCTION__,__LINE__, ##args);   \
     }                                                                                   \
 } while(0)
 
