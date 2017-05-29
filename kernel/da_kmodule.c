@@ -100,21 +100,23 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Abhishek Ghogare, Dhantu");
 MODULE_DESCRIPTION("Disaggregation Emulator");
 
-static int      pid             = 10;
+static int      pid[1000]      = {10};
+static int      pid_count       = 0;
 static ulong    latency_ns      = 10000ULL;
 static ulong    bandwidth_bps   = 10000000000ULL;
        ulong    local_npages    = 20ULL;
 static ulong    page_fault_count= 0ULL;
 
-module_param(pid, int, 0444);               // pid cannot be changed but read directly from sysfs
+module_param_array(pid, int, &pid_count, 0444);    // Array of pids to run an emulator instance on
+//module_param(pid, int, 0444);                     // pid cannot be changed but read directly from sysfs
 module_param(latency_ns, ulong, 0644);
 module_param(bandwidth_bps, ulong, 0644);
-module_param(da_debug_flag, uint, 0644);    // debug level flags, can be set from sysfs
-module_param(local_npages, ulong, 0644);    // number of local pages, acts as a cache for remote memory
-module_param(page_fault_count, ulong, 0444);               // pid cannot be changed but read directly from sysfs 
+module_param(da_debug_flag, uint, 0644);            // debug level flags, can be set from sysfs
+module_param(local_npages, ulong, 0644);            // number of local pages, acts as a cache for remote memory
+module_param(page_fault_count, ulong, 0444);        // pid cannot be changed but read directly from sysfs 
 // TODO: unsigned long is 64bit in x86_64, need to change to ull
 
-MODULE_PARM_DESC(pid, "PID of a process to track");
+MODULE_PARM_DESC(pid, "List of PIDs of a processes to track");
 MODULE_PARM_DESC(latency_ns, "One way latency in nano-sec");
 MODULE_PARM_DESC(bandwidth_bps, "Bandwidth of network in bits-per-sec");
 MODULE_PARM_DESC(da_debug_flag, "Module debug log level flags");
@@ -131,18 +133,22 @@ MODULE_PARM_DESC(page_fault_count, "Number of total page faults");
  */
 int init_module(void)
 {
+    int i;
     DA_ENTRY();
 
     HOOK_START_FN_NAME  = do_page_fault_hook_start_new;
     HOOK_END_FN_NAME    = do_page_fault_hook_end_new;
-    DA_INFO("hook insertion complete, tracking on %d", pid);
+    DA_INFO("hook insertion complete");
 
     if (pt_init_ptracker() != 0) {
         goto init_reset_hook;
     }
 
-    DA_INFO("clearing pages");
-    pt_add_children(pid);
+    for(i=0 ; i<pid_count ; ++i) {
+        DA_INFO("adding process %d to tracking", pid[i]);
+
+        pt_add_children(pid[i]);
+    }
     goto init_good;
 
 init_reset_hook:
