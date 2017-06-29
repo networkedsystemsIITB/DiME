@@ -1,0 +1,3 @@
+[submodule "user/test/microbench/tsc"]
+	path = user/test/microbench/tsc
+	url = https://github.com/dterei/tsc.git
