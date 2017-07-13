@@ -18,15 +18,16 @@ function resetup_everything {
 	reboot_server
 
 	ssh root@$server_ip "
+		service redis stop;
 		echo never > /sys/kernel/mm/transparent_hugepage/enabled &&
 		sync &&
 		echo 3 > /proc/sys/vm/drop_caches &&
-		service memcached stop &&
+		service redis1 stop &&
 		sleep 2 &&
-		service memcached start &&
-		service redis stop &&
+		service redis1 start &&
+		service redis2 stop &&
 		sleep 2 &&
-		service redis start || exit 1
+		service redis2 start || exit 1
 	" || exit 1
 	kmod_remove_module
 	berk_remove_module
@@ -45,15 +46,18 @@ function kmod_remove_module {
 
 function kmod_insert_module {
 	kmod_remove_module
+
+	instance1_pid=`ssh root@$server_ip "ps aux | grep redis | grep $redis_instance1_port | head -n1 | sed 's/[ \t]\+/\t/g' | cut -f 2"`
+	instance2_pid=`ssh root@$server_ip "ps aux | grep redis | grep $redis_instance2_port | head -n1 | sed 's/[ \t]\+/\t/g' | cut -f 2"`
 	
-	if [ "$process_in_module" == "memcached" ]; then
-		pid=`ssh root@$server_ip "ps aux | grep '/usr/bin/memcached' | head -n1 | sed 's/[ \t]\+/\t/g' | cut -f 2"`
-	elif [ "$process_in_module" == "redis" ]; then
-		pid=`ssh root@$server_ip "ps aux | grep '/usr/local/bin/redis-server' | head -n1 | sed 's/[ \t]\+/\t/g' | cut -f 2"`
+	if [ "$process_in_module" == "redis1" ]; then
+		pid=$instance1_pid
+	elif [ "$process_in_module" == "redis2" ]; then
+		pid=$instance2_pid
 	elif [ "$process_in_module" == "both" ]; then
-		pid=`ssh root@$server_ip "ps aux | grep '/usr/bin/memcached' | head -n1 | sed 's/[ \t]\+/\t/g' | cut -f 2"`
+		pid=$instance1_pid
 		pid+=","
-		pid+=`ssh root@$server_ip "ps aux | grep '/usr/local/bin/redis-server' | head -n1 | sed 's/[ \t]\+/\t/g' | cut -f 2"`
+		pid+=$instance2_pid
 	fi &&
 	ssh root@$server_ip "
 		echo \"Inserting module with pid=$pid local_npages=$kmod_local_npages latency_ns=$kmod_latency_ns bandwidth_bps=$kmod_bandwidth_bps\";
@@ -86,70 +90,45 @@ function berk_insert_module {
 }
 
 
+# Params:
+#	$1 = redis instance id
+#
 function redis_load {
+	if [ "$1" == "1" ]; then
+		redis_port=$redis_instance1_port
+		redis_workload_config=$redis_short_workload_config
+	elif [ "$1" == "2" ]; then
+		redis_port=$redis_instance2_port
+		redis_workload_config=$redis_long_workload_config
+	fi
+
 	pushd $ycsb_home > /dev/null
 		./bin/ycsb load redis -s \
 			-P $redis_workload_config \
 			-p "redis.host=$server_ip" \
+			-p "redis.port=$redis_port" \
 			-threads 10
 	popd > /dev/null
 }
+
+# Params:
+#	$1 = redis instance id
+#
 function redis_run {
-	pid_redis=`ssh root@$server_ip "pgrep redis | head -n1"`
+	if [ "$1" == "1" ]; then
+		redis_port=$redis_instance1_port
+		redis_workload_config=$redis_short_workload_config
+	elif [ "$1" == "2" ]; then
+		redis_port=$redis_instance2_port
+		redis_workload_config=$redis_long_workload_config
+	fi
 
 	pushd $ycsb_home > /dev/null
 		./bin/ycsb run redis -s \
 			-P $redis_workload_config \
 			-p "redis.host=$server_ip" \
-			-threads 10 &
-
-	pid_redis_ycsb=$!
-
-	while [ -d "/proc/${pid_redis_ycsb}" ]
-	do
-		rss_redis=`ssh root@$server_ip "cat /proc/${pid_redis}/status | grep -i vmrss | awk '{print $2}'"`
-		swap_redis=`ssh root@$server_ip "cat /proc/${pid_redis}/status | grep -i vmswap | awk '{print $2}'"`
-		echo -e "${sleep_counter}\t${rss_redis}" >> ${testfile_prefix}-run-redis-rss.log
-		echo -e "${sleep_counter}\t${swap_redis}" >> ${testfile_prefix}-run-redis-swap.log
-		sleep 2;
-	done;
-
-	wait;
-
-	popd > /dev/null
-}
-
-function memcached_load {
-	pushd $ycsb_home > /dev/null
-		./bin/ycsb load memcached -s \
-			-P $memcached_workload_config \
-			-p "memcached.hosts=$server_ip" \
+			-p "redis.port=$redis_port" \
 			-threads 10
-	popd > /dev/null
-}
-function memcached_run {
-	pid_memcached=`ssh root@$server_ip "pgrep memcached | head -n1"`
-
-	pushd $ycsb_home > /dev/null
-	
-		./bin/ycsb run memcached -s \
-			-P $memcached_workload_config \
-			-p "memcached.hosts=$server_ip" \
-			-threads 10 &
-
-		pid_memcached_ycsb=$!
-
-		while [ -d "/proc/${pid_memcached_ycsb}" ]
-		do
-			rss_memcached=`ssh root@$server_ip "cat /proc/${pid_memcached}/status | grep -i vmrss | awk '{print $2}'"`
-			swap_memcached=`ssh root@$server_ip "cat /proc/${pid_memcached}/status | grep -i vmswap | awk '{print $2}'"`
-			echo -e "${sleep_counter}\t${rss_memcached}" >> ${testfile_prefix}-run-memcached-rss.log
-			echo -e "${sleep_counter}\t${swap_memcached}" >> ${testfile_prefix}-run-memcached-swap.log
-			sleep 2;
-		done;
-
-		wait;
-
 	popd > /dev/null
 }
 
@@ -158,49 +137,33 @@ function run_processes {
 		# load data to both redis and memcached
 		if [ "$execute_multiple" == "yes" ]
 		then
-			redis_load | tee ${testfile_prefix}-redis-load.log &
-			memcached_load | tee ${testfile_prefix}-memcached-load.log
-		elif [ "$process_in_module" == "redis" ]
-		then
-			redis_load | tee ${testfile_prefix}-redis-load.log
-		elif [ "$process_in_module" == "memcached" ]
-		then
-			memcached_load | tee ${testfile_prefix}-memcached-load.log
+			redis_load 2 | tee ${testfile_prefix}-redis-instance-2-load.log &
+			redis_load 1 | tee ${testfile_prefix}-redis-instance-1-load.log
+		else
+			redis_load 1 | tee ${testfile_prefix}-redis-instance-1-load.log
 		fi
 
 		wait	# wait for loading
 
 		if [ "$enable_module" == "kmod" ]; then
 			pagefaults=$(ssh $server_ip "cat /sys/module/kmodule/parameters/page_fault_count");
-			echo "[OVERALL], pagefault_count, $pagefaults" >>  ${testfile_prefix}-redis-load.log
-			echo "[OVERALL], pagefault_count, $pagefaults" >>  ${testfile_prefix}-memcached-load.log
+			echo "[OVERALL], pagefault_count, $pagefaults" >>  ${testfile_prefix}-redis-instance-1-load.log
 		fi
 
 		if [ "$execute_multiple" == "yes" ]
 		then
-			#TODO::
-			# process in consideration
-			memcached_run | tee ${testfile_prefix}-memcached-run.log &
-			redis_run | tee ${testfile_prefix}-redis-run.log
-		elif [ "$process_in_module" == "redis" ]
-		then
-			redis_run | tee ${testfile_prefix}-redis-run.log
-		elif [ "$process_in_module" == "memcached" ]
-		then
-			memcached_run | tee ${testfile_prefix}-memcached-run.log
-		fi
-
-		# kill memcached client
-		if [ "$execute_multiple" == "yes" ]
-		then
+			redis_run 2 | tee ${testfile_prefix}-redis-instance-2-run.log &
+			redis_run 1 | tee ${testfile_prefix}-redis-instance-1-run.log
+			# kill other instance client
 			kill $(ps aux | grep 'ycsb' | grep -v "grep" | awk '{print $2}')
+		else
+			redis_run 1 | tee ${testfile_prefix}-redis-instance-1-run.log
 		fi
 
 		if [ "$enable_module" == "kmod" ]; then
 			pagefaults_new=$(ssh $server_ip "cat /sys/module/kmodule/parameters/page_fault_count");
 			pagefaults_new=$((pagefaults_new-pagefaults));
-			echo "[OVERALL], pagefault_count, $pagefaults_new" >>  ${testfile_prefix}-redis-run.log
-			echo "[OVERALL], pagefault_count, $pagefaults_new" >>  ${testfile_prefix}-memcached-run.log
+			echo "[OVERALL], pagefault_count, $pagefaults_new" >>  ${testfile_prefix}-redis-instance-1-run.log
 		fi
 
 		ssh root@$server_ip "dmesg -c" > ${testfile_prefix}-dmesg.log
@@ -247,38 +210,18 @@ popd > /dev/null
 server_ip=192.168.122.97
 ycsb_home=/home/u/YCSB_new
 kmod_path_on_server="/opt/DiME/kernel/kmodule.ko"
-memcached_workload_config="${ycsb_home}/workloads/workloada_m"
-redis_workload_config="${ycsb_home}/workloads/workloada_r"
+redis_short_workload_config="${ycsb_home}/workloads/workloada_r"
+redis_long_workload_config="${ycsb_home}/workloads/workloada_m"
 process_in_module="both"
+redis_instance1_port=6381
+redis_instance2_port=6382
 #TODO::
 process_in_consideration="redis"
 #TODO::
 
 
+# 7.6G available memory
 function run_single_test {
-
-	# berk module parameters
-#	berk_remote_memory_gb=1000
-#	berk_bandwith_gbps=100
-#	berk_latency_us=5
-#	berk_inject_latency=1
-#	enable_module="berk"
-#	execute_multiple="no"
-#	for berk_remote_memory_gb in 7.55 7.46 7.36 7.27 7.17 7; # 10 20 30 40 50 60
-#	do
-#		run_test
-#	done
-
-	# kmodule parameters
-#	kmod_latency_ns=2500
-#	kmod_bandwidth_bps=100000000000
-#	kmod_local_npages=1000000000
-#	enable_module="kmod"
-#	execute_multiple="no"
-#	for kmod_local_npages in 25000 50000 75000 100000 125000 150000; # 10 20 30 40 50 60
-#	do
-#		run_test
-#	done
 
 	# kmodule parameters
 	kmod_latency_ns=2500
@@ -298,10 +241,35 @@ function run_single_test {
 	berk_inject_latency=1
 	enable_module="berk"
 	execute_multiple="yes"
-	for berk_remote_memory_gb in 7.46 7.27 7 6.887 6.696 6.5; # 10 20 30 40 50 60
+	for berk_remote_memory_gb in 7.4 7.2 7 6.8 6.6 6.4; # 10 20 30 40 50 60
 	do
 		run_test
 	done
+
+
+	# berk module parameters
+	berk_remote_memory_gb=1000
+	berk_bandwith_gbps=100
+	berk_latency_us=5
+	berk_inject_latency=1
+	enable_module="berk"
+	execute_multiple="no"
+	for berk_remote_memory_gb in 7.5 7.4 7.3 7.2 7.1 7; # 10 20 30 40 50 60
+	do
+		run_test
+	done
+
+	# kmodule parameters
+	kmod_latency_ns=2500
+	kmod_bandwidth_bps=100000000000
+	kmod_local_npages=1000000000
+	enable_module="kmod"
+	execute_multiple="no"
+	for kmod_local_npages in 25000 50000 75000 100000 125000 150000; # 10 20 30 40 50 60
+	do
+		run_test
+	done
+
 }
 
 
