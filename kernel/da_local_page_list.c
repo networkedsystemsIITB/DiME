@@ -74,58 +74,50 @@ int lpl_AddPage(struct mm_struct * mm, ulong address) {
 	int ret_execute_delay = 0;
 	//struct list_head *lnode = NULL;
 
-	while (local_npages < lpl_count) 
-	{
-		ulong addr;
-		struct list_head *first_node = lpl_head.next;
+	while (local_npages < lpl_count) {
+		node = list_first_entry(&lpl_head, struct lpl_node_struct, list_node);
 
-		addr = list_entry(first_node, struct lpl_node_struct, list_node)->address;
-		// ml_reset_inlist(mm, addr);
-		ml_protect_page(mm, addr);
-		list_del(first_node);
-		kfree(first_node);	// TODO :: free not the list node, but container of list node
+		ml_protect_page(node->mm, node->address);
+		list_del(&node->list_node);
+		kfree(node);
 		lpl_count--;
+		node = NULL;
 		DA_INFO("remove extra local page, current count:%lu", lpl_count);
 	}
 
-	if (local_npages == 0)
-	{
+	if (local_npages == 0) {
 		// no need to add this address
 		// we can treat this case as infinite local pages, and no need to inject delay on any of the page
 		ret_execute_delay = 0;
 		return ret_execute_delay;
-	}
-	else if (local_npages > lpl_count) 
-	{
+	} else if (local_npages > lpl_count) {
 		// Since there is still free space locally for remote pages, delay should not be injected
 		ret_execute_delay = 0;
 		node = (struct lpl_node_struct*) kmalloc(sizeof(struct lpl_node_struct), GFP_KERNEL);
 
-		if(node) 
-		{
+		if(node) {
 			list_add(&(node->list_node), &lpl_head);
 			lpl_count++;
 			//DA_INFO("add extra local page, current count:%lu", lpl_count);
-		}
-		else
-		{
+		} else {
 			DA_ERROR("unable to allocate memory");
 			return ret_execute_delay;
 		}
-	}
-	else
-	{	
+	} else {	
 		// protect FIFO last address, so that it will be faulted in future
-		ulong addr = list_first_entry(&lpl_head, struct lpl_node_struct, list_node)->address;
+		node = list_first_entry(&lpl_head, struct lpl_node_struct, list_node);
 		// ml_reset_inlist(mm, addr);
-		ml_protect_page(mm, addr);
+		ml_protect_page(node->mm, node->address);
 		// Since local pages are occupied, delay should be injected
 		ret_execute_delay = 1;
+		node = NULL;
 	}
 
 
 	list_rotate_left(&lpl_head);
-	list_last_entry(&lpl_head, struct lpl_node_struct, list_node)->address = address;
+	node = list_last_entry(&lpl_head, struct lpl_node_struct, list_node);
+	node->address = address;
+	node->mm = mm;
 	// ml_set_inlist(mm, address);
 	// ml_unprotect_page(mm, address);		// no page fault for pages in list // might be reason for crash, bad swap entry
 
@@ -136,12 +128,9 @@ void lpl_CleanList() {
     DA_ENTRY();
 
 	while (!list_empty(&lpl_head)) {
-		ulong addr = 0;
-		struct list_head *first_node = lpl_head.next;
-		addr = list_entry(first_node, struct lpl_node_struct, list_node)->address;
-		//DA_INFO("removing from local mem : address:%lu", addr);
-		list_del(first_node);
-		kfree(first_node);
+		struct lpl_node_struct *node = list_first_entry(&lpl_head, struct lpl_node_struct, list_node);
+		list_del(&node->list_node);
+		kfree(node);
 	}
 
     DA_EXIT();
