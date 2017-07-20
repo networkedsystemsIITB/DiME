@@ -5,7 +5,7 @@ struct lpl_node_struct {
 	struct list_head list_node;
 	
 	ulong address;
-	struct mm_struct * mm;
+	pid_t pid;
 };
 
 int 	test_list		(ulong address);

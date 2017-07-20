@@ -47,13 +47,14 @@ int test_list(ulong address) {
 
 	int location=0;
 	struct list_head *lnode = NULL;
+	struct lpl_node_struct *node;
 
 	location=0;
 	list_for_each(lnode, &lpl_head) {
 		location++;
-		if (list_entry(lnode, struct lpl_node_struct, list_node)->address == address) {
-			//break;
-			return location;
+		node = list_entry(lnode, struct lpl_node_struct, list_node);
+		if (node->pid <= 0) {
+			DA_ERROR("\tPID value invalid : %d,  address : %lu", node->pid, node->address); 
 		}
 	}
 
@@ -69,6 +70,27 @@ int test_list(ulong address) {
 	return 0;
 }
 
+struct mm_struct * get_mm_struct(pid_t ppid) {
+    struct pid *pid_struct = NULL;
+    struct task_struct *ts;
+
+    pid_struct = find_get_pid(ppid);
+    if(!pid_struct) {
+        DA_ERROR("could not find struct pid for PID:%d", ppid);
+	test_list(0);
+        return NULL;   /* No such process */
+    }
+
+    ts = pid_task(pid_struct, PIDTYPE_PID);
+    if(!ts) {
+        DA_ERROR("could not find task_struct for PID:%d", ppid);
+	test_list(0);
+        return NULL;   /* No such process */
+    }
+
+    return ts->mm;
+}
+
 int lpl_AddPage(struct mm_struct * mm, ulong address) {
 	struct lpl_node_struct *node = NULL;
 	int ret_execute_delay = 0;
@@ -77,7 +99,7 @@ int lpl_AddPage(struct mm_struct * mm, ulong address) {
 	while (local_npages < lpl_count) {
 		node = list_first_entry(&lpl_head, struct lpl_node_struct, list_node);
 
-		ml_protect_page(node->mm, node->address);
+		ml_protect_page(get_mm_struct(node->pid), node->address);
 		list_del(&node->list_node);
 		kfree(node);
 		lpl_count--;
@@ -106,8 +128,10 @@ int lpl_AddPage(struct mm_struct * mm, ulong address) {
 	} else {	
 		// protect FIFO last address, so that it will be faulted in future
 		node = list_first_entry(&lpl_head, struct lpl_node_struct, list_node);
+		if(node->pid < 0)
+			 DA_ERROR("invalid pid: %d : address:%lu", node->pid, node->address);
 		// ml_reset_inlist(mm, addr);
-		ml_protect_page(node->mm, node->address);
+		ml_protect_page(get_mm_struct(node->pid), node->address);
 		// Since local pages are occupied, delay should be injected
 		ret_execute_delay = 1;
 		node = NULL;
@@ -117,7 +141,9 @@ int lpl_AddPage(struct mm_struct * mm, ulong address) {
 	list_rotate_left(&lpl_head);
 	node = list_last_entry(&lpl_head, struct lpl_node_struct, list_node);
 	node->address = address;
-	node->mm = mm;
+	node->pid = current->pid;
+	if(current->pid < 0)
+		DA_ERROR("invalid pid: %d : address:%lu", current->pid, address);
 	// ml_set_inlist(mm, address);
 	// ml_unprotect_page(mm, address);		// no page fault for pages in list // might be reason for crash, bad swap entry
 
