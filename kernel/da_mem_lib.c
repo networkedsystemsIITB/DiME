@@ -25,13 +25,29 @@ pte_t * ml_get_ptep(struct mm_struct *mm, unsigned long virt) {
     pud_t *pud;
     pmd_t *pmd;
     pte_t *pte;
-    pgd_t *pgd = pgd_offset(mm, virt);
+    pgd_t *pgd;
+
+    if(mm==NULL){
+        DA_ERROR("mm is null");
+        return NULL;
+    }
+    pgd = pgd_offset(mm, virt);
+    if(pgd == NULL)
+	DA_ERROR("pgd is null : address:%lu", virt);
     if (pgd_none(*pgd) || pgd_bad(*pgd))
         return NULL;
+
     pud = pud_offset(pgd, virt);
+    if(pud == NULL)
+        DA_ERROR("pud is null : address:%lu", virt);
+
     if (pud_none(*pud) || pud_bad(*pud))
         return NULL;
+
     pmd = pmd_offset(pud, virt);
+    if(pmd == NULL)
+        DA_ERROR("pmd is null : address:%lu", virt);
+
     if (pmd_none(*pmd) || pmd_bad(*pmd))
         return NULL;
     if (!(pte = pte_offset_map(pmd, virt)))
