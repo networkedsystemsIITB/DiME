@@ -3,8 +3,9 @@ CONFIG_MODULE_SIG_ALL=n
 
 EXTRA_CFLAGS := -I./
 
-obj-m += kmodule.o
-kmodule-objs += da_mem_lib.o da_kmodule.o da_local_page_list.o da_ptracker.o
+obj-m += kmodule.o prp_fifo_module.o
+prp_fifo_module-objs += prp_fifo.o da_mem_lib.o
+kmodule-objs += da_mem_lib.o da_kmodule.o da_ptracker.o
 
 all:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
