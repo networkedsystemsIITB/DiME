@@ -21,12 +21,14 @@
 #include "da_mem_lib.h"
 #include "da_local_page_list.h"
 #include "da_ptracker.h"
+#include "common.h"
 
 unsigned int da_debug_flag =    DA_DEBUG_ALERT_FLAG | 
                                 DA_DEBUG_INFO_FLAG | 
                                 DA_DEBUG_WARNING_FLAG | 
                                 DA_DEBUG_ERROR_FLAG | 
                                 DA_DEBUG_ENTRYEXIT_FLAG;
+EXPORT_SYMBOL(da_debug_flag);
 
 /*****
  *
@@ -100,7 +102,7 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Abhishek Ghogare, Dhantu");
 MODULE_DESCRIPTION("Disaggregation Emulator");
 
-static int      pid[1000]      = {10};
+static int      pid[1000]       = {10};
 static int      pid_count       = 0;
 static ulong    latency_ns      = 10000ULL;
 static ulong    bandwidth_bps   = 10000000000ULL;
@@ -123,6 +125,13 @@ MODULE_PARM_DESC(da_debug_flag, "Module debug log level flags");
 MODULE_PARM_DESC(local_npages, "Number of available local pages");
 MODULE_PARM_DESC(page_fault_count, "Number of total page faults");
 
+
+struct dime_instance_struct dime_instance = {
+    .instance_id        = 0,
+    .pid_count          = 0,
+    .page_fault_count   = 0,
+    .prp                = NULL,
+};
 
 /*****
  *
@@ -148,7 +157,16 @@ int init_module(void)
         DA_INFO("adding process %d to tracking", pid[i]);
 
         pt_add_children(pid[i]);
+
+        dime_instance.pid[i] = pid[i];
+        dime_instance.pid_count++;
     }
+
+    dime_instance.latency_ns        = latency_ns;
+    dime_instance.bandwidth_bps     = bandwidth_bps;
+    dime_instance.local_npages      = local_npages;
+    dime_instance.page_fault_count  = page_fault_count;
+
     goto init_good;
 
 init_reset_hook:
@@ -167,7 +185,8 @@ void cleanup_module(void)
     HOOK_START_FN_NAME  = NULL; 
     HOOK_END_FN_NAME    = NULL;                    // Removing hook, setting to NULL
     pt_exit_ptracker();
-    lpl_CleanList();
+    if (dime_instance.prp)
+        dime_instance.prp->clean(&dime_instance);
     DA_INFO("cleaning up module complete");
     DA_EXIT();
 }
@@ -201,7 +220,7 @@ int do_page_fault_hook_start_new (struct pt_regs *regs,
             else
                 DA_WARNING("duplecate entry :: ptep entry is null");*/
 
-            if(lpl_AddPage(current->mm, address) == 1)
+            if(dime_instance.prp && dime_instance.prp->add_page(&dime_instance, current->mm, address) == 1)
                 *hook_flag = 1;                     // Set flag to execute delay in end hook
         }
     }
@@ -227,11 +246,11 @@ int do_page_fault_hook_end_new (struct pt_regs *regs,
         // Inject delays here
         // ml_set_inlist(current->mm, address);
         // ml_unprotect_page(current->mm, address);     // no page fault for pages in list // might be reason for crash, bad swap entry
-        page_fault_count++;
+        dime_instance.page_fault_count++;
 
         delay_ns = 0;
-        delay_ns = ((PAGE_SIZE * 8ULL) * 1000000000ULL) / bandwidth_bps;   // Transmission delay
-        delay_ns += 2*latency_ns;                                       // Two way latency
+        delay_ns = ((PAGE_SIZE * 8ULL) * 1000000000ULL) / dime_instance.bandwidth_bps;  // Transmission delay
+        delay_ns += 2*dime_instance.latency_ns;                                         // Two way latency
         while ((sched_clock() - *hook_timestamp) < delay_ns) {
             // Wait for delay
             //count++;
@@ -240,3 +259,30 @@ int do_page_fault_hook_end_new (struct pt_regs *regs,
 
     return 0;
 }
+
+int register_page_replacement_policy(struct page_replacement_policy_struct *prp) {
+    if(dime_instance.prp) {
+        DA_ERROR("page replacement policy already registered, please remove any existing policy module first");
+        return -EPERM;  // Operation not permitted
+    }
+
+    dime_instance.prp = prp;
+
+    // TODO:: initialize all procsses again
+    return 0;
+}
+
+int deregister_page_replacement_policy(struct page_replacement_policy_struct *prp) {
+    if(dime_instance.prp != prp) {
+        DA_ERROR("the policy given is not registered with dime, please provide correct policy");
+        return -EPERM;  // Operation not permitted
+    }
+
+    dime_instance.prp = NULL;
+
+    return 0;
+}
+
+EXPORT_SYMBOL(register_page_replacement_policy);
+EXPORT_SYMBOL(deregister_page_replacement_policy);
+
