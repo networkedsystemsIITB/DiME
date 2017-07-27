@@ -27,4 +27,6 @@ int ml_is_inlist(struct mm_struct *mm, ulong address);
 int ml_set_inlist(struct mm_struct *mm, ulong address);
 int ml_reset_inlist(struct mm_struct *mm, ulong address);
 
+struct mm_struct * ml_get_mm_struct(pid_t ppid);
+
 #endif//__DA_MEM_LIB_H__

@@ -13,6 +13,8 @@
 #include <linux/slab.h>
 #include <asm/pgtable_types.h>
 
+#include <linux/pid.h>      // find_get_pid
+
 #include "da_mem_lib.h"
 
 /*  get_ptep
@@ -172,4 +174,26 @@ int ml_reset_inlist(struct mm_struct *mm, ulong address) {
     }
     
     return 0;           // Failure
+}
+
+
+struct mm_struct * ml_get_mm_struct(pid_t ppid) {
+    struct pid *pid_struct = NULL;
+    struct task_struct *ts;
+
+    pid_struct = find_get_pid(ppid);
+    if(!pid_struct) {
+        DA_ERROR("could not find struct pid for PID:%d", ppid);
+    //test_list(0);
+        return NULL;   /* No such process */
+    }
+
+    ts = pid_task(pid_struct, PIDTYPE_PID);
+    if(!ts) {
+        DA_ERROR("could not find task_struct for PID:%d", ppid);
+    //test_list(0);
+        return NULL;   /* No such process */
+    }
+
+    return ts->mm;
 }
