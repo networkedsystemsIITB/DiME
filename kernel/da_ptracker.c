@@ -19,18 +19,10 @@ int pt_find(struct dime_instance_struct *dime_instance, pid_t pid) {
 
 
 int pt_add(struct dime_instance_struct *dime_instance, pid_t pid) {
-    struct pid *pid_struct = NULL;
-    struct task_struct *task = NULL;
+    struct mm_struct *mm = NULL;
 
-    pid_struct = find_get_pid(pid);
-    if(!pid_struct) {
-        DA_ERROR("could not find struct pid for PID:%d", pid);
-        return -ESRCH;   /* No such process */
-    }
-
-    task = pid_task(pid_struct, PIDTYPE_PID);
-    if(!task) {
-        DA_ERROR("could not find task_struct for PID:%d", pid);
+    mm = ml_get_mm_struct(pid);
+    if(!mm) {
         return -ESRCH;   /* No such process */
     }
 
@@ -38,17 +30,8 @@ int pt_add(struct dime_instance_struct *dime_instance, pid_t pid) {
 
     dime_instance->pid[dime_instance->pid_count++] = pid;
 
-    ml_protect_all_pages(task->mm);
+    ml_protect_all_pages(mm);
     DA_INFO("process added to tracking list : pid:%d", pid);
-
-    // DEBUG
-/*    {
-        int i;
-        DA_INFO("Printing pid list : ");
-        for(i=0 ; i<pl->size ; ++i) {
-            DA_INFO("\t%d", pl->list[i]);
-        }
-    }*/
 
     return 0;
 }
