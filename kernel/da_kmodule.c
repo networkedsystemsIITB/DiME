@@ -149,15 +149,7 @@ int init_module(void)
     HOOK_END_FN_NAME    = do_page_fault_hook_end_new;
     DA_INFO("hook insertion complete");
 
-    if (pt_init_ptracker() != 0) {
-        goto init_reset_hook;
-    }
-
     for(i=0 ; i<pid_count ; ++i) {
-        DA_INFO("adding process %d to tracking", pid[i]);
-
-        pt_add_children(pid[i]);
-
         dime_instance.pid[i] = pid[i];
         dime_instance.pid_count++;
     }
@@ -261,6 +253,8 @@ int do_page_fault_hook_end_new (struct pt_regs *regs,
 }
 
 int register_page_replacement_policy(struct page_replacement_policy_struct *prp) {
+    int i;
+    
     if(dime_instance.prp) {
         DA_ERROR("page replacement policy already registered, please remove any existing policy module first");
         return -EPERM;  // Operation not permitted
@@ -268,7 +262,16 @@ int register_page_replacement_policy(struct page_replacement_policy_struct *prp)
 
     dime_instance.prp = prp;
 
-    // TODO:: initialize all procsses again
+    // initialize processes
+    if (pt_init_ptracker() != 0) {
+        return -1; // TODO:: valid error code
+    }
+
+    for(i=0 ; i<dime_instance.pid_count ; ++i) {
+        DA_INFO("adding process %d to tracking", pid[i]);
+
+        pt_add_children(dime_instance.pid[i]);
+    }
     return 0;
 }
 
@@ -278,6 +281,7 @@ int deregister_page_replacement_policy(struct page_replacement_policy_struct *pr
         return -EPERM;  // Operation not permitted
     }
 
+    pt_exit_ptracker();
     dime_instance.prp = NULL;
 
     return 0;
