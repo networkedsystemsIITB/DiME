@@ -20,5 +20,6 @@ struct prp_fifo_struct {
 int		test_list		(ulong address);
 int		lpl_AddPage		(struct dime_instance_struct *dime_instance, struct mm_struct * mm, ulong address);		// Returns 1 if delay should be injected, else 0
 void	lpl_CleanList	(struct dime_instance_struct *dime_instance);
+void	__lpl_CleanList	(struct prp_fifo_struct *prp_fifo);
 
 #endif//__DA_LOCAL_PAGE_LIST_H__

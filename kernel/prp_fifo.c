@@ -161,9 +161,7 @@ void lpl_Init(struct dime_instance_struct *dime_instance) {
 }
 
 
-void lpl_CleanList(struct dime_instance_struct *dime_instance) {
-	struct prp_fifo_struct *prp_fifo = to_prp_fifo_struct(dime_instance->prp);
-
+void __lpl_CleanList (struct prp_fifo_struct *prp_fifo) {
     DA_ENTRY();
 
 	while (!list_empty(&prp_fifo->lpl_head)) {
@@ -173,6 +171,11 @@ void lpl_CleanList(struct dime_instance_struct *dime_instance) {
 	}
 
     DA_EXIT();
+}
+
+void lpl_CleanList (struct dime_instance_struct *dime_instance) {
+	struct prp_fifo_struct *prp_fifo = to_prp_fifo_struct(dime_instance->prp);
+	__lpl_CleanList(prp_fifo);
 }
 
 
@@ -191,7 +194,7 @@ void cleanup_module(void) {
     DA_ENTRY();
 
     deregister_page_replacement_policy(&prp_fifo.prp);
-    lpl_CleanList(NULL);
+    __lpl_CleanList(&prp_fifo);
 
     DA_INFO("cleaning up module complete");
     DA_EXIT();
