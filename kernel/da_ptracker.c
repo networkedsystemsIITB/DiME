@@ -201,8 +201,10 @@ void pt_exit_ptracker(void) {
     unregister_jprobe(&jprobe_wake_up_new_task_struct);
 
     DA_INFO("cleaning pid list...");
-    if(pid_list_s.list)
+    if(pid_list_s.list) {
         vfree(pid_list_s.list);
+        pid_list_s.list = NULL;
+    }
 
     DA_INFO("cleaning process tracker complete");
 }
