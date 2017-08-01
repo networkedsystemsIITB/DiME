@@ -196,7 +196,7 @@ int do_page_fault_hook_start_new (struct pt_regs *regs,
                             ulong * hook_timestamp) {
     *hook_flag = 0;
     
-    if(address != 0ul && pt_find(current->tgid) >= 0) {
+    if(address != 0ul && pt_find(&dime_instance, current->tgid) >= 0) {
         // Start timer now, to calculate page fetch delay later
         *hook_timestamp = sched_clock();
 
@@ -270,7 +270,7 @@ int register_page_replacement_policy(struct page_replacement_policy_struct *prp)
     for(i=0 ; i<dime_instance.pid_count ; ++i) {
         DA_INFO("adding process %d to tracking", pid[i]);
 
-        pt_add_children(dime_instance.pid[i]);
+        pt_add_children(&dime_instance, dime_instance.pid[i]);
     }
     return 0;
 }
