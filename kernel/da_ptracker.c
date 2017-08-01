@@ -57,8 +57,7 @@ int pt_add(struct dime_instance_struct *dime_instance, pid_t pid) {
 // Add parent pid and all the children pids to tracking list
 int pt_add_children(struct dime_instance_struct *dime_instance, pid_t ppid) {
     struct list_head * p;
-    struct pid *pid_struct = NULL;
-    struct task_struct *ts, *tsk;
+    struct task_struct *ts;
     pid_t tmp_pid;
 
     if(pt_find(dime_instance, ppid) < 0) {
@@ -67,20 +66,13 @@ int pt_add_children(struct dime_instance_struct *dime_instance, pid_t ppid) {
             return retval;
     }
 
-    pid_struct = find_get_pid(ppid);
-    if(!pid_struct) {
-        DA_ERROR("could not find struct pid for PID:%d", ppid);
-        return -ESRCH;   /* No such process */
-    }
-
-    ts = pid_task(pid_struct, PIDTYPE_PID);
+    ts = ml_get_task_struct(ppid);
     if(!ts) {
-        DA_ERROR("could not find task_struct for PID:%d", ppid);
         return -ESRCH;   /* No such process */
     }
 
     list_for_each(p, &(ts->children)){
-        tsk = list_entry(p, struct task_struct, sibling);
+        struct task_struct *tsk = list_entry(p, struct task_struct, sibling);
         // TODO:: take tgid instead of pid
         tmp_pid = tsk->pid;
         pt_add_children(dime_instance, tmp_pid);
