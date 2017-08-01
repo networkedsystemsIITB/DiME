@@ -176,24 +176,32 @@ int ml_reset_inlist(struct mm_struct *mm, ulong address) {
     return 0;           // Failure
 }
 
-
-struct mm_struct * ml_get_mm_struct(pid_t ppid) {
-    struct pid *pid_struct = NULL;
+struct task_struct * ml_get_task_struct(pid_t pid) {
+    struct pid *ps = NULL;
     struct task_struct *ts;
 
-    pid_struct = find_get_pid(ppid);
-    if(!pid_struct) {
-        DA_ERROR("could not find struct pid for PID:%d", ppid);
+    ps = find_get_pid(pid);
+    if(!ps) {
+        DA_ERROR("could not find struct pid for PID:%d", pid);
     //test_list(0);
         return NULL;   /* No such process */
     }
 
-    ts = pid_task(pid_struct, PIDTYPE_PID);
+    ts = pid_task(ps, PIDTYPE_PID);
     if(!ts) {
-        DA_ERROR("could not find task_struct for PID:%d", ppid);
+        DA_ERROR("could not find task_struct for PID:%d", pid);
     //test_list(0);
         return NULL;   /* No such process */
     }
 
-    return ts->mm;
+    return ts;
+}
+
+
+struct mm_struct * ml_get_mm_struct(pid_t pid) {
+    struct task_struct *ts;
+    
+    ts = ml_get_task_struct(pid);
+
+    return ts==NULL ? NULL : ts->mm;
 }
