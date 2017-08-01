@@ -1,13 +1,27 @@
 #!/bin/bash
 
-# Change pwd to script path
-SCRIPT_PATH="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+function remove_dime_module {
+	if [ `lsmod | grep kmodule | wc -l` -gt 0 ] 
+	then 
+	    echo "Removing DiME module.."
+	    rmmod kmodule || exit 1
+	fi
+}
 
-if [ `lsmod | grep kmodule | wc -l` -gt 0 ] 
-then 
-    echo "Removing module.."
-    rmmod kmodule || exit 1
-fi
+function remove_fifo_policy_module {
+	if [ `lsmod | grep prp_fifo_module | wc -l` -gt 0 ] 
+	then 
+	    echo "Removing FIFO policy module.."
+	    rmmod prp_fifo_module || exit 1
+	fi
+}
+
+function initialize {
+	echo never > /sys/kernel/mm/transparent_hugepage/enabled
+
+	remove_fifo_policy_module
+	remove_dime_module
+}
 
 # Module parameters :
 pid=100
@@ -15,7 +29,8 @@ latency_ns=10000
 local_npages=1000
 bandwidth_bps=10000000000000000
 
-echo never > /sys/kernel/mm/transparent_hugepage/enabled
+# Change pwd to script path
+SCRIPT_PATH="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 if [ "$#" -lt "1" ]
 then
@@ -23,6 +38,8 @@ then
     exit 1
 fi
 
+echo "Initialing modules..."
+initialize
 
 start_time_ns=`date +%s%N`
 
@@ -39,8 +56,10 @@ then
     exit 1
 fi
 
-echo "Inserting module.."
+echo "Inserting DiME module.."
 insmod $SCRIPT_PATH/../kernel/kmodule.ko pid=$pid latency_ns=$latency_ns local_npages=$local_npages bandwidth_bps=$bandwidth_bps
+echo "Inserting FIFO policy module.."
+insmod $SCRIPT_PATH/../kernel/prp_fifo_module.ko
 
 wait $pid
 
