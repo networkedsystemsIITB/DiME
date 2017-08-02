@@ -268,7 +268,7 @@ int register_page_replacement_policy(struct page_replacement_policy_struct *prp)
     }
 
     for(i=0 ; i<dime_instance.pid_count ; ++i) {
-        DA_INFO("adding process %d to tracking", pid[i]);
+        DA_INFO("adding process %d to tracking", dime_instance.pid[i]);
 
         pt_add_children(&dime_instance, dime_instance.pid[i]);
     }

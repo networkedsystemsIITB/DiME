@@ -124,7 +124,7 @@ int lpl_AddPage(struct dime_instance_struct *dime_instance, struct mm_struct * m
 	} else {	
 		// protect FIFO last address, so that it will be faulted in future
 		node = list_first_entry(&prp_fifo->lpl_head, struct lpl_node_struct, list_node);
-		if(node->pid < 0)
+		if(node->pid <= 0)
 			 DA_ERROR("invalid pid: %d : address:%lu", node->pid, node->address);
 		// ml_reset_inlist(mm, addr);
 		ml_protect_page(ml_get_mm_struct(node->pid), node->address);
@@ -138,7 +138,7 @@ int lpl_AddPage(struct dime_instance_struct *dime_instance, struct mm_struct * m
 	node = list_last_entry(&prp_fifo->lpl_head, struct lpl_node_struct, list_node);
 	node->address = address;
 	node->pid = current->pid;
-	if(current->pid < 0)
+	if(current->pid <= 0)
 		DA_ERROR("invalid pid: %d : address:%lu", current->pid, address);
 	// ml_set_inlist(mm, address);
 	// ml_unprotect_page(mm, address);		// no page fault for pages in list // might be reason for crash, bad swap entry
