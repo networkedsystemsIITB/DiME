@@ -1,21 +1,37 @@
-50a51,58
->  * Page fault hook
->  */
-> int (*do_page_fault_hook_start)(struct pt_regs *regs, unsigned long error_code, unsigned long address, int * hook_flag, ulong * hook_timestamp) = NULL;
-> EXPORT_SYMBOL(do_page_fault_hook_start);
-> int (*do_page_fault_hook_end)(struct pt_regs *regs, unsigned long error_code, unsigned long address, int * hook_flag, ulong * hook_timestamp) = NULL;
-> EXPORT_SYMBOL(do_page_fault_hook_end);
-> 
-> /*
-1458a1467,1472
-> 	// Calling do_page_fault_hook start hook function
-> 	int hook_flag 			= 0;
-> 	ulong hook_timestamp	= 0;
-> 	if(do_page_fault_hook_start != NULL)
-> 		do_page_fault_hook_start(regs, error_code, address, &hook_flag, &hook_timestamp);
-> 
-1461a1476,1479
-> 
-> 	// Calling do_page_fault_hook end hook function
-> 	if(do_page_fault_hook_end != NULL)
-> 		do_page_fault_hook_end(regs, error_code, address, &hook_flag, &hook_timestamp);
+50,69d49
+< 
+< 
+< int (*do_page_fault_hook_start)(
+< 					struct pt_regs *regs,
+< 					unsigned long error_code,
+< 					unsigned long address,
+< 					int * hook_flag,
+< 					ulong * hook_timestamp) = NULL;
+< EXPORT_SYMBOL(do_page_fault_hook_start);
+< int (*do_page_fault_hook_end)(
+< 					struct pt_regs *regs,
+< 					unsigned long error_code,
+< 					unsigned long address,
+< 					int * hook_flag,
+< 					ulong * hook_timestamp) = NULL;
+< EXPORT_SYMBOL(do_page_fault_hook_end);
+< 
+< 
+< 
+< 
+1479,1486d1458
+< 
+<         // Calling do_page_fault_hook start hook function
+<         int hook_flag                   = 0;
+<         ulong hook_timestamp    = 0;
+< 	if(do_page_fault_hook_start != NULL) {
+< 		do_page_fault_hook_start(regs, error_code, address, &hook_flag, &hook_timestamp);
+< 	}
+< 
+1490,1495d1461
+< 
+< 	
+<         // Calling do_page_fault_hook end hook function
+< 	if(do_page_fault_hook_end != NULL) {
+< 		do_page_fault_hook_end(regs, error_code, address, &hook_flag, &hook_timestamp);
+< 	}
