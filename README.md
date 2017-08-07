@@ -2,15 +2,15 @@
 
 Resource disaggregation is a new design paradigm for datacenter servers, where the compute, memory, storage, and I/O resources of servers are disaggregated and connected by a high-speed interconnect network. Resource disaggregation, and memory disaggregation in particular, can have significant impact on application performance due to the increased latency in accessing a portion of the system’s memory remotely. While applications need to be redesigned and optimized to work well on these new architectures, the unavailability of commodity disaggregated memory hardware makes it difficult to evaluate any such optimizations. To address this issue, our work develops an emulator Dime, for disaggregated memory systems. Our tool can emulate different access latencies over different parts of an application’s memory image as specified by the user. We evaluate our tool extensively using popular datacenter workloads to demonstrate its efficacy and usefulness, and show that it outperforms previous emulators in its ability to emulate different access delays at a fine per-page granularity.
 
-### User's Guide
-##### Installation
+## User's Guide
+### Installation
 Clone github repository:
 ```sh
 $ git clone <github repo url>
 $ git submodule update --init --recursive
 $ cd DiME && make
 ```
-###### Add hooks to `do_page_fault` function:
+##### Add hooks to `do_page_fault` function:
 1) Edit `<linux source>/arch/<arch>/mm/fault.c` file to add the following hook function pointer declarations.
     ```c
     int (*do_page_fault_hook_start)(
@@ -56,7 +56,7 @@ $ cd DiME && make
     $ make && make install
     ```
 
-##### Usage
+### Usage
 Use `./user/tools/insert_module.sh` script to insert DiME module with a list of PIDs and a config file.
 ```
 $ ./user/tools/insert_module.sh -h
@@ -69,7 +69,7 @@ Mandatory arguments to long options are mandatory for short options too.
 ```
 Refer to `./user/tools/config_template.conf` config template file for DiME configuration parameters.
 
-### Developer's Guide
+## Developer's Guide
 A basic FIFO page eviction policy is available currently. DiME is modularized so that other developers can develope and add a custome page eviction policy as a separate module. To develope a new eviction policy module, developer is required to implement various operations specified in `page_replacement_policy_struct` structure defined in `kernel/common.h`. 
 ```c
 struct page_replacement_policy_struct {
