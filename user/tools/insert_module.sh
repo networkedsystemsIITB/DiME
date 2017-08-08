@@ -84,3 +84,4 @@ echo never > /sys/kernel/mm/transparent_hugepage/enabled
 
 echo "Inserting module.. pid=$pids $parameter_list"
 insmod $SCRIPT_PATH/../../kernel/kmodule.ko pid=$pids $parameter_list
+insmod $SCRIPT_PATH/../../kernel/prp_fifo_module.ko
