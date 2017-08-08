@@ -15,6 +15,7 @@ struct prp_fifo_struct {
 
 	struct list_head lpl_head;
 	ulong lpl_count;
+	rwlock_t lock;
 };
 
 int		test_list		(ulong address);

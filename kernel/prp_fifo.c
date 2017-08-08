@@ -93,12 +93,17 @@ int lpl_AddPage(struct dime_instance_struct *dime_instance, struct mm_struct * m
 	//struct list_head *lnode = NULL;
 
 	while (dime_instance->local_npages < prp_fifo->lpl_count) {
-		node = list_first_entry(&prp_fifo->lpl_head, struct lpl_node_struct, list_node);
+		struct list_head *first_node;
+		write_lock(&prp_fifo->lock);
+		first_node = prp_fifo->lpl_head.next;
+		list_del_rcu(first_node);
+		prp_fifo->lpl_count--;
+		write_unlock(&prp_fifo->lock);
+
+		node = list_entry(first_node, struct lpl_node_struct, list_node);
 
 		ml_protect_page(ml_get_mm_struct(node->pid), node->address);
-		list_del(&node->list_node);
 		kfree(node);
-		prp_fifo->lpl_count--;
 		node = NULL;
 		DA_INFO("remove extra local page, current count:%lu", prp_fifo->lpl_count);
 	}
@@ -113,31 +118,35 @@ int lpl_AddPage(struct dime_instance_struct *dime_instance, struct mm_struct * m
 		ret_execute_delay = 0;
 		node = (struct lpl_node_struct*) kmalloc(sizeof(struct lpl_node_struct), GFP_KERNEL);
 
-		if(node) {
-			list_add(&(node->list_node), &prp_fifo->lpl_head);
-			prp_fifo->lpl_count++;
-			//DA_INFO("add extra local page, current count:%lu", lpl_count);
-		} else {
+		if(!node) {
 			DA_ERROR("unable to allocate memory");
 			return ret_execute_delay;
+		} else {
+			write_lock(&prp_fifo->lock);
+			prp_fifo->lpl_count++;
+			write_unlock(&prp_fifo->lock);
 		}
-	} else {	
+	} else {
+		struct list_head *first_node;
+		write_lock(&prp_fifo->lock);
+		first_node = prp_fifo->lpl_head.next;
+		list_del_rcu(first_node);
+		write_unlock(&prp_fifo->lock);
 		// protect FIFO last address, so that it will be faulted in future
-		node = list_first_entry(&prp_fifo->lpl_head, struct lpl_node_struct, list_node);
+		node = list_entry(first_node, struct lpl_node_struct, list_node);
 		if(node->pid <= 0)
 			 DA_ERROR("invalid pid: %d : address:%lu", node->pid, node->address);
 		// ml_reset_inlist(mm, addr);
 		ml_protect_page(ml_get_mm_struct(node->pid), node->address);
 		// Since local pages are occupied, delay should be injected
 		ret_execute_delay = 1;
-		node = NULL;
 	}
 
-
-	list_rotate_left(&prp_fifo->lpl_head);
-	node = list_last_entry(&prp_fifo->lpl_head, struct lpl_node_struct, list_node);
 	node->address = address;
 	node->pid = current->pid;
+	write_lock(&prp_fifo->lock);
+	list_add_tail_rcu(&(node->list_node), &prp_fifo->lpl_head);
+	write_unlock(&prp_fifo->lock);
 	if(current->pid <= 0)
 		DA_ERROR("invalid pid: %d : address:%lu", current->pid, address);
 	// ml_set_inlist(mm, address);
@@ -158,6 +167,7 @@ void lpl_Init(struct dime_instance_struct *dime_instance) {
 	};
 
 	prp_fifo.lpl_head = (struct list_head) { &(prp_fifo.lpl_head), &(prp_fifo.lpl_head) };
+	rwlock_init(&prp_fifo.lock);
 }
 
 
@@ -166,7 +176,7 @@ void __lpl_CleanList (struct prp_fifo_struct *prp_fifo) {
 
 	while (!list_empty(&prp_fifo->lpl_head)) {
 		struct lpl_node_struct *node = list_first_entry(&prp_fifo->lpl_head, struct lpl_node_struct, list_node);
-		list_del(&node->list_node);
+		list_del_rcu(&node->list_node);
 		kfree(node);
 	}
 
