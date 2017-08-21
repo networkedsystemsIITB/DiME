@@ -23,7 +23,12 @@ struct dime_instance_struct {
 	struct page_replacement_policy_struct *prp;
 };
 
-extern struct dime_instance_struct dime_instance;
+struct dime_struct {
+	struct dime_instance_struct dime_instances[50];
+	int dime_instances_size;
+};
+
+extern struct dime_struct dime;
 
 
 int register_page_replacement_policy(struct page_replacement_policy_struct *prp);
