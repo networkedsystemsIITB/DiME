@@ -4,6 +4,7 @@ Resource disaggregation is a new design paradigm for datacenter servers, where t
 
 
 ## User's Guide
+DiME is compatible with Linux Kernel 4.9.44 (longterm).
 ### Installation
 Clone github repository:
 ```sh
