@@ -7,6 +7,18 @@
 #include "da_mem_lib.h"
 #include "da_ptracker.h"
 
+struct dime_instance_struct * pt_get_dime_instance_of_pid (struct dime_struct *dime, pid_t pid) {
+    int i, j;
+    for (i=0 ; i<dime->dime_instances_size ; ++i) {
+        for (j=0 ; j<dime->dime_instances[i].pid_count ; ++j) {
+            if(dime->dime_instances[i].pid[j] == pid)
+                return &(dime->dime_instances[i]);
+        }
+    }
+
+    return NULL;
+}
+
 int pt_find(struct dime_instance_struct *dime_instance, pid_t pid) {
     int i;
     for (i=0 ; i<dime_instance->pid_count ; ++i) {
@@ -65,27 +77,29 @@ int pt_add_children(struct dime_instance_struct *dime_instance, pid_t ppid) {
 }
 
 
-int pt_find_parents(struct dime_instance_struct *dime_instance, struct task_struct *tsk) {
+struct dime_instance_struct * pt_find_parents(struct dime_struct *dime, struct task_struct *tsk) {
     if (tsk) {
-        int loc = pt_find(dime_instance, tsk->pid);
-        if(loc >= 0) {
+        struct dime_instance_struct *dime_instance = pt_get_dime_instance_of_pid(dime, tsk->pid);
+        if(dime_instance) {
             DA_INFO("parent found in list : ppid:%d", tsk->pid);
-            return loc;
+            return dime_instance;
         }
             
         if(tsk->pid > 1)
-            return pt_find_parents(dime_instance, tsk->parent);
+            return pt_find_parents(dime, tsk->parent);
     }
 
-    return -1;
+    return NULL;
 }
 
 
 // jprobe handler function
 static ssize_t pt_jprobe_wake_up_new_task(struct task_struct *tsk) {
     // TODO:: Traverse list of instances to find out in which instance the parent of this process belongs
-    if(pt_find_parents(&dime_instance, tsk) >= 0)
-        pt_add_children(&dime_instance, tsk->pid);
+    struct dime_instance_struct *dime_instance = pt_find_parents(&dime, tsk);
+
+    if(dime_instance)
+        pt_add_children(dime_instance, tsk->pid);
     jprobe_return();
     return 0;
 }
