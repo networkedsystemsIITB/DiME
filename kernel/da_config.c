@@ -26,7 +26,7 @@ int init_dime_config_procfs(void) {
     if (dime_config_entry == NULL) {
         remove_proc_entry(PROCFS_NAME, NULL);
 
-        DA_ALERT("Could not initialize /proc/%s\n", PROCFS_NAME);
+        DA_ALERT("could not initialize /proc/%s\n", PROCFS_NAME);
         return -ENOMEM;
     }
 
@@ -94,12 +94,13 @@ long long int update_page_fault_count = -1;
 void set_config_param(char *key, char *value) {
     int err;
     long long_val;
+
     // first trim the strings
     key = strim(key);
     value = strim(value);
 
     if(strcmp(key, "instance_id") == 0) {
-        DA_ERROR("Setting instance_id : %s", value);
+        DA_INFO("setting instance_id : %s", value);
         err = kstrtol(value, 10, &long_val);
         if(err != 0) {
             DA_ERROR("invalid number : %s (error:%d)", value, err);
@@ -107,14 +108,14 @@ void set_config_param(char *key, char *value) {
         } else {
             update_instance_id = long_val;
         }
-    } else if(strcmp(key, "pids") == 0) {
+    } else if(strcmp(key, "pid") == 0) {
         char *pid_start, *pid_end;
         pid_end = pid_start = value;
         while( (pid_start = strsep(&pid_end, ",")) != NULL) {
             if(strlen(pid_start) == 0)
                 continue;       // invalid token, try again
 
-            DA_ERROR("Adding PID : %s", pid_start);
+            DA_INFO("adding PID : %s", pid_start);
             // TODO:: append mode for '+'
             err = kstrtol(pid_start, 10, &long_val);
             if(err != 0) {
@@ -127,7 +128,7 @@ void set_config_param(char *key, char *value) {
             }
         }
     } else if(strcmp(key, "latency_ns") == 0) {
-        DA_ERROR("Setting latency_ns : %s", value);
+        DA_INFO("setting latency_ns : %s", value);
         err = kstrtol(value, 10, &long_val);
         if(err != 0) {
             DA_ERROR("invalid number : %s (error:%d)", value, err);
@@ -136,7 +137,7 @@ void set_config_param(char *key, char *value) {
             update_latency_ns = long_val;
         }
     } else if(strcmp(key, "bandwidth_bps") == 0) {
-        DA_ERROR("Setting bandwidth_bps : %s", value);
+        DA_INFO("setting bandwidth_bps : %s", value);
         err = kstrtol(value, 10, &long_val);
         if(err != 0) {
             DA_ERROR("invalid number : %s (error:%d)", value, err);
@@ -145,7 +146,7 @@ void set_config_param(char *key, char *value) {
             update_bandwidth_bps = long_val;
         }
     } else if(strcmp(key, "local_npages") == 0) {
-        DA_ERROR("Setting local_npages : %s", value);
+        DA_INFO("setting local_npages : %s", value);
         err = kstrtol(value, 10, &long_val);
         if(err != 0) {
             DA_ERROR("invalid number : %s (error:%d)", value, err);
@@ -154,7 +155,7 @@ void set_config_param(char *key, char *value) {
             update_local_npages = long_val;
         }
     } else if(strcmp(key, "page_fault_count") == 0) {
-        DA_ERROR("Setting page_fault_count : %s", value);
+        DA_INFO("setting page_fault_count : %s", value);
         err = kstrtol(value, 10, &long_val);
         if(err != 0) {
             DA_ERROR("invalid number : %s (error:%d)", value, err);
@@ -213,23 +214,22 @@ static ssize_t procfile_write(struct file *file, const char *buffer, size_t leng
      * Now, set the modified config parameters
      */
 
-    // Check if instance_id is given
     if(update_instance_id == -1) {
+        // instance_id was not given
         DA_ERROR("missing mandatory instance_id parameter");
         return -EINVAL;
     } else if (update_instance_id > dime.dime_instances_size) {
-        DA_ERROR("instance id of new instance must be +1 of max instance_id");
+        DA_ERROR("instance_id of new instance must be +1 of max instance_id");
         return -EINVAL;
-    } else {
-        if(dime.dime_instances_size-1 < update_instance_id) {
-            dime.dime_instances_size = update_instance_id+1;
-            dime.dime_instances[update_instance_id].instance_id         = update_instance_id;
-            dime.dime_instances[update_instance_id].latency_ns          = 10000ULL;
-            dime.dime_instances[update_instance_id].bandwidth_bps       = 10000000000ULL;
-            dime.dime_instances[update_instance_id].local_npages        = 20ULL;
-            dime.dime_instances[update_instance_id].page_fault_count    = 0ULL;
-            dime.dime_instances[update_instance_id].pid_count           = 0;
-        }
+    } else if (dime.dime_instances_size == update_instance_id) {
+        // create new instance 
+        dime.dime_instances_size = update_instance_id+1;
+        dime.dime_instances[update_instance_id].instance_id         = update_instance_id;
+        dime.dime_instances[update_instance_id].latency_ns          = 10000ULL;
+        dime.dime_instances[update_instance_id].bandwidth_bps       = 10000000000ULL;
+        dime.dime_instances[update_instance_id].local_npages        = 20ULL;
+        dime.dime_instances[update_instance_id].page_fault_count    = 0ULL;
+        dime.dime_instances[update_instance_id].pid_count           = 0;
     }
 
     if(update_pid_count != -1) {
