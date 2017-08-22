@@ -57,7 +57,8 @@ then
 fi
 
 echo "Inserting DiME module.."
-insmod $SCRIPT_PATH/../kernel/kmodule.ko pid=$pid latency_ns=$latency_ns local_npages=$local_npages bandwidth_bps=$bandwidth_bps
+insmod $SCRIPT_PATH/../kernel/kmodule.ko
+echo "instance_id=0 pid=$pid latency_ns=$latency_ns local_npages=$local_npages bandwidth_bps=$bandwidth_bps" > /proc/dime_config
 echo "Inserting FIFO policy module.."
 insmod $SCRIPT_PATH/../kernel/prp_fifo_module.ko
 
