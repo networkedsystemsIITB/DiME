@@ -53,7 +53,7 @@ static ssize_t procfile_read(struct file *file, char *buffer, size_t length, lof
         // offset is 0, so first call to read the file.
         // Initialize buffer with config parameters currently set
         int i, j;
-        procfs_buffer_size = sprintf(procfs_buffer, "Instance_ID latency_ns bandwidth_bps local_npages page_fault_count PIDs\n");
+        procfs_buffer_size = sprintf(procfs_buffer, "instance_id latency_ns bandwidth_bps local_npages page_fault_count pids\n");
         for(i=0 ; i<dime.dime_instances_size ; ++i) {
             procfs_buffer_size += sprintf(procfs_buffer+procfs_buffer_size, 
                                             "%11d %10lu %13lu %12lu %16lu ", dime.dime_instances[i].instance_id,
@@ -234,11 +234,13 @@ static ssize_t procfile_write(struct file *file, const char *buffer, size_t leng
 
     if(update_pid_count != -1) {
         int i=0;
+        dime.dime_instances[update_instance_id].pid_count = 0;  // Default mode is to set pids, not append
         for(i=0 ; i<update_pid_count ; i++) {
             dime.dime_instances[update_instance_id].pid[dime.dime_instances[update_instance_id].pid_count++] = update_pids[i];
-            // TODO:: protect this pid here, or later in policy
+            // TODO:: protect this pid here, or later in page replacement policy
             // TODO:: assumming instance_id and array index are same
             // TODO:: check if pid exists before adding to list
+            // TODO:: add append pid list feature
         }
     }
 
