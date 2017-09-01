@@ -53,7 +53,7 @@ static ssize_t procfile_read(struct file *file, char *buffer, size_t length, lof
         // offset is 0, so first call to read the file.
         // Initialize buffer with config parameters currently set
         int i, j;
-        procfs_buffer_size = sprintf(procfs_buffer, "instance_id latency_ns bandwidth_bps local_npages page_fault_count pids\n");
+        procfs_buffer_size = sprintf(procfs_buffer, "instance_id latency_ns bandwidth_bps local_npages page_fault_count pid\n");
         for(i=0 ; i<dime.dime_instances_size ; ++i) {
             procfs_buffer_size += sprintf(procfs_buffer+procfs_buffer_size, 
                                             "%11d %10lu %13lu %12lu %16lu ", dime.dime_instances[i].instance_id,
