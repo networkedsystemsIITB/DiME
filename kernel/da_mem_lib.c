@@ -17,6 +17,10 @@
 
 #include "da_mem_lib.h"
 
+// Function pointer to flush_tlb_page function. Since it is not exported symbol,
+// it has to be extracted using kallsyms_lookup_name function.
+void (*flush_tlb_page_fp) (struct vm_area_struct *, unsigned long) = NULL;
+
 /*  get_ptep
  *
  *  Description:
@@ -87,11 +91,19 @@ void ml_protect_all_pages(struct mm_struct * mm) {
 
 
 int ml_protect_page(struct mm_struct *mm, ulong address) {
+    struct vm_area_struct *vma = NULL;
 	pte_t* ptep = ml_get_ptep(mm, address);
 	if(ptep && pte_present(*ptep)) {       // TODO:: why check if present
 	    // Protect page "address"
 	    set_pte( ptep , pte_clear_flags(*ptep, _PAGE_PRESENT) );
 	    set_pte( ptep , pte_set_flags(*ptep, _PAGE_PROTNONE) );
+
+        vma = find_vma(mm, address);
+        if(vma == NULL || address >= vma->vm_end)
+            DA_WARNING("could not find vma for address: %lu", address);
+        else if(flush_tlb_page_fp!=NULL)
+            flush_tlb_page_fp(vma, address);
+
 	    return 1;	// Success
 	}
 

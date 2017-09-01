@@ -152,10 +152,21 @@ struct dime_instance_struct dime_instance = {
 int init_module(void)
 {
     int i;
+    extern void (*flush_tlb_page_fp) (struct vm_area_struct *, unsigned long);
+    unsigned long fp = 0;
     DA_ENTRY();
 
     if(init_dime_config_procfs()) {
         return -1; // TODO:: Error codes
+    }
+
+    fp = kallsyms_lookup_name("flush_tlb_page");
+    if(fp==0) {
+        DA_ERROR("Could not find symbol flush_tlb_page");
+        flush_tlb_page_fp = NULL;
+        return -1;  // TODO:: Error codes
+    } else {
+        flush_tlb_page_fp = (void (*) (struct vm_area_struct *, unsigned long ))fp;
     }
 
     HOOK_START_FN_NAME  = do_page_fault_hook_start_new;
