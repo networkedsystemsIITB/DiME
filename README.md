@@ -91,6 +91,8 @@ instance_id latency_ns bandwidth_bps local_npages page_fault_count pid
 ```
 Note: changes in pid list must be followed by insertion of page replacement policy module, if already inserted, remove and re-insert the policy module.
 
+Note: check `dmesg` for any errors while modifying the configuration.
+
 ## Developer's Guide
 A basic FIFO page eviction policy is available currently. DiME is modularized so that other developers can develope and add a custome page eviction policy as a separate module. To develope a new eviction policy module, developer is required to implement various operations specified in `page_replacement_policy_struct` structure defined in `kernel/common.h`. 
 ```c
