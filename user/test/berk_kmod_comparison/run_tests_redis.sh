@@ -36,6 +36,11 @@ function resetup_everything {
 
 function kmod_remove_module {
 		ssh root@$server_ip '
+			if [ `lsmod | grep prp_fifo_module | wc -l` -gt 0 ];
+			then
+				echo "Removing page replacement policy module..";
+				rmmod prp_fifo_module || exit 1;
+			fi;
 			if [ `lsmod | grep kmodule | wc -l` -gt 0 ];
 			then
 				echo "Removing module..";
@@ -50,18 +55,26 @@ function kmod_insert_module {
 	instance1_pid=`ssh root@$server_ip "ps aux | grep redis | grep $redis_instance1_port | head -n1 | sed 's/[ \t]\+/\t/g' | cut -f 2"`
 	instance2_pid=`ssh root@$server_ip "ps aux | grep redis | grep $redis_instance2_port | head -n1 | sed 's/[ \t]\+/\t/g' | cut -f 2"`
 	
-	if [ "$process_in_module" == "redis1" ]; then
+	if [ "$kmod_process_in_module" == "redis1" ]; then
 		pid=$instance1_pid
-	elif [ "$process_in_module" == "redis2" ]; then
+	elif [ "$kmod_process_in_module" == "redis2" ]; then
 		pid=$instance2_pid
-	elif [ "$process_in_module" == "both" ]; then
+	elif [ "$kmod_process_in_module" == "shared" ]; then
 		pid=$instance1_pid
 		pid+=","
 		pid+=$instance2_pid
+	elif [ "$kmod_process_in_module" == "separate" ]; then
+		pid=$instance1_pid
+		pid1=$instance2_pid
 	fi &&
 	ssh root@$server_ip "
 		echo \"Inserting module with pid=$pid local_npages=$kmod_local_npages latency_ns=$kmod_latency_ns bandwidth_bps=$kmod_bandwidth_bps\";
-		insmod $kmod_path_on_server  pid=$pid local_npages=$kmod_local_npages latency_ns=$kmod_latency_ns bandwidth_bps=$kmod_bandwidth_bps || exit 2;
+		insmod $kmod_path_on_server  &&
+		echo  'instance_id=0 pid=$pid local_npages=$kmod_local_npages latency_ns=$kmod_latency_ns bandwidth_bps=$kmod_bandwidth_bps' > /proc/dime_config &&
+		if [ \"$kmod_process_in_module\" == \"separate\" ]; then 
+			echo  'instance_id=1 pid=$pid1 local_npages=$kmod_local_npages latency_ns=$kmod_latency_ns bandwidth_bps=$kmod_bandwidth_bps' > /proc/dime_config; 
+		fi &&
+		insmod $kmod_prp_path_on_server || exit 2;
 	" || exit 1
 }
 
@@ -146,7 +159,7 @@ function run_processes {
 		wait	# wait for loading
 
 		if [ "$enable_module" == "kmod" ]; then
-			pagefaults=$(ssh $server_ip "cat /sys/module/kmodule/parameters/page_fault_count");
+			pagefaults=$(ssh $server_ip "cat /proc/dime_config | head -n2 | tail -n1 | sed 's/[ \t\r\n]\+/ /g' | cut -d' ' -f6");
 			echo "[OVERALL], pagefault_count, $pagefaults" >>  ${testfile_prefix}-redis-instance-1-load.log
 		fi
 
@@ -161,7 +174,7 @@ function run_processes {
 		fi
 
 		if [ "$enable_module" == "kmod" ]; then
-			pagefaults_new=$(ssh $server_ip "cat /sys/module/kmodule/parameters/page_fault_count");
+			pagefaults_new=$(ssh $server_ip "cat /proc/dime_config | head -n2 | tail -n1 | sed 's/[ \t\r\n]\+/ /g' | cut -d' ' -f6");
 			pagefaults_new=$((pagefaults_new-pagefaults));
 			echo "[OVERALL], pagefault_count, $pagefaults_new" >>  ${testfile_prefix}-redis-instance-1-run.log
 		fi
@@ -182,7 +195,7 @@ function run_test {
 	elif [ "$enable_module" == "kmod" ]; then
 		berk_remove_module
 		kmod_insert_module
-		testname="test-${testcase}-kmod-insert_module-${enable_module}-execute_multiple-${execute_multiple}-local_npages-${kmod_local_npages}-latency-${kmod_latency_ns}-bandwidth-${kmod_bandwidth_bps}"
+		testname="test-${testcase}-kmod-insert_module-${enable_module}-execute_multiple-${execute_multiple}-local_npages-${kmod_local_npages}-latency-${kmod_latency_ns}-bandwidth-${kmod_bandwidth_bps}-kmod_process_in_module-${kmod_process_in_module}"
 		testfile_prefix=$curdir/$testname
 	elif [ "$enable_module" == "berk" ]; then
 		kmod_remove_module
@@ -210,9 +223,10 @@ popd > /dev/null
 server_ip=192.168.122.97
 ycsb_home=/home/u/YCSB_new
 kmod_path_on_server="/opt/DiME/kernel/kmodule.ko"
+kmod_prp_path_on_server="/opt/DiME/kernel/prp_fifo_module.ko"
 redis_short_workload_config="${ycsb_home}/workloads/workloada_r"
 redis_long_workload_config="${ycsb_home}/workloads/workloada_m"
-process_in_module="both"
+kmod_process_in_module="redis1"	# shared/separate/redis1/redis2
 redis_instance1_port=6381
 redis_instance2_port=6382
 #TODO::
@@ -223,15 +237,38 @@ process_in_consideration="redis"
 # 7.6G available memory
 function run_single_test {
 
+        # kmodule parameters
+        kmod_latency_ns=2500
+        kmod_bandwidth_bps=100000000000
+        kmod_local_npages=1000000000
+        enable_module="kmod"
+        execute_multiple="no"
+        kmod_process_in_module="redis1"
+        for kmod_local_npages in 25000 50000 75000 100000 125000 150000; # 10 20 30 40 50 60
+        do
+                run_test
+        done
+
+
 	# kmodule parameters
 	kmod_latency_ns=2500
 	kmod_bandwidth_bps=100000000000
 	kmod_local_npages=1000000000
 	enable_module="kmod"
 	execute_multiple="yes"
-	for kmod_local_npages in 50000 100000 150000 200000 250000 300000; # 10 20 30 40 50 60
+	for kmod_local_npages in 25000 50000 75000 100000 125000 150000; # 10 20 30 40 50 60
 	do
-		run_test
+		temp_local_npages=$kmod_local_npages;
+		for kmod_process_in_module in "shared" "separate" "redis1";
+		do
+			if [ "$kmod_process_in_module" == "shared" ];
+			then
+				kmod_local_npages=$((kmod_local_npages*2));
+			else
+				kmod_local_npages=$temp_local_npages;
+			fi
+			run_test
+		done
 	done
 
 	# berk module parameters
@@ -255,17 +292,6 @@ function run_single_test {
 	enable_module="berk"
 	execute_multiple="no"
 	for berk_remote_memory_gb in 7.5 7.4 7.3 7.2 7.1 7; # 10 20 30 40 50 60
-	do
-		run_test
-	done
-
-	# kmodule parameters
-	kmod_latency_ns=2500
-	kmod_bandwidth_bps=100000000000
-	kmod_local_npages=1000000000
-	enable_module="kmod"
-	execute_multiple="no"
-	for kmod_local_npages in 25000 50000 75000 100000 125000 150000; # 10 20 30 40 50 60
 	do
 		run_test
 	done
