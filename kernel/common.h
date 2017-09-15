@@ -19,6 +19,7 @@ struct dime_instance_struct {
 	ulong	bandwidth_bps;
 	ulong	local_npages;
 	ulong	page_fault_count;
+	ulong	page_fault_count_prot[16];
 
 	struct page_replacement_policy_struct *prp;
 };
