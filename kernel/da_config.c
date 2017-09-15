@@ -53,6 +53,10 @@ static ssize_t procfile_read(struct file *file, char *buffer, size_t length, lof
         // offset is 0, so first call to read the file.
         // Initialize buffer with config parameters currently set
         int i, j;
+        char permissions_str[16][10] = {"____", "r___", "_w__", "rw__", 
+                                    "__x_", "r_x_", "_wx_", "rwx_", 
+                                    "___s", "r__s", "_w_s", "rw_s", 
+                                    "__xs", "r_xs", "_wxs", "rwxs" };
         procfs_buffer_size = sprintf(procfs_buffer, "instance_id latency_ns bandwidth_bps local_npages page_fault_count pid\n");
         for(i=0 ; i<dime.dime_instances_size ; ++i) {
             procfs_buffer_size += sprintf(procfs_buffer+procfs_buffer_size, 
@@ -64,6 +68,14 @@ static ssize_t procfile_read(struct file *file, char *buffer, size_t length, lof
             for(j=0 ; j<dime.dime_instances[i].pid_count ; ++j) {
                 procfs_buffer_size += sprintf(procfs_buffer+procfs_buffer_size, "%d,", dime.dime_instances[i].pid[j]);
             }
+            procfs_buffer[procfs_buffer_size++] = '\n';
+        }
+        for(i=0 ; i<dime.dime_instances_size ; ++i) {
+            int j;
+            for(j=0 ; j<16 ; ++j) {
+                procfs_buffer_size += sprintf(procfs_buffer+procfs_buffer_size, "inst: %-3d %5s %16lu\n", i, permissions_str[j], dime.dime_instances[i].page_fault_count_prot[j]);
+            }
+            procfs_buffer_size += sprintf(procfs_buffer+procfs_buffer_size, "inst: %-3d %5s %16lu\n", i, "total", dime.dime_instances[i].page_fault_count);
             procfs_buffer[procfs_buffer_size++] = '\n';
         }
     }
@@ -171,6 +183,7 @@ void set_config_param(char *key, char *value) {
 
 static ssize_t procfile_write(struct file *file, const char *buffer, size_t length, loff_t *offset) {
     char *token_start, *token_end;
+    int i;
 
     //TODO:: handle multiple calls in segments of string to write
     procfs_buffer_size = length;
@@ -230,6 +243,9 @@ static ssize_t procfile_write(struct file *file, const char *buffer, size_t leng
         dime.dime_instances[update_instance_id].local_npages        = 20ULL;
         dime.dime_instances[update_instance_id].page_fault_count    = 0ULL;
         dime.dime_instances[update_instance_id].pid_count           = 0;
+        for(i=0 ; i<16 ; ++i) {
+            dime.dime_instances[update_instance_id].page_fault_count_prot[i] = 0;
+        }
     }
 
     if(update_pid_count != -1) {
