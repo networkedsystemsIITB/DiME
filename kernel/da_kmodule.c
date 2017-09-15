@@ -182,6 +182,9 @@ int init_module(void)
     dime.dime_instances[0].bandwidth_bps    = bandwidth_bps;
     dime.dime_instances[0].local_npages     = local_npages;
     dime.dime_instances[0].page_fault_count = page_fault_count;
+    for(i=0 ; i<16 ; ++i) {
+        dime.dime_instances[0].page_fault_count_prot[i] = 0;
+    }
     dime.dime_instances_size                = 1;
 
     goto init_good;
@@ -266,6 +269,7 @@ int do_page_fault_hook_end_new (struct pt_regs *regs,
     // Check if hook_flag was set in start hook
     if(*hook_flag != 0) {
         struct dime_instance_struct *dime_instance = pt_get_dime_instance_of_pid(&dime, current->tgid);
+        struct vm_area_struct *vma = NULL;
         if(dime_instance) {
             // Inject delays here
             // ml_set_inlist(current->mm, address);
@@ -278,6 +282,12 @@ int do_page_fault_hook_end_new (struct pt_regs *regs,
             while ((sched_clock() - *hook_timestamp) < delay_ns) {
                 // Wait for delay
                 //count++;
+            }
+
+            vma = find_vma(current->mm, address);
+            if(vma) {
+                ulong flag = vma->vm_flags & (VM_READ | VM_WRITE | VM_EXEC | VM_SHARED);
+                dime_instance->page_fault_count_prot[flag]++;
             }
         }
     }
