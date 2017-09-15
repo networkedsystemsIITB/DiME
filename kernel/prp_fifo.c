@@ -111,11 +111,11 @@ int lpl_AddPage(struct dime_instance_struct *dime_instance, struct mm_struct * m
 	if (dime_instance->local_npages == 0) {
 		// no need to add this address
 		// we can treat this case as infinite local pages, and no need to inject delay on any of the page
-		ret_execute_delay = 0;
+		ret_execute_delay = 1;
 		return ret_execute_delay;
 	} else if (dime_instance->local_npages > prp_fifo->lpl_count) {
 		// Since there is still free space locally for remote pages, delay should not be injected
-		ret_execute_delay = 0;
+		ret_execute_delay = 1;
 		node = (struct lpl_node_struct*) kmalloc(sizeof(struct lpl_node_struct), GFP_KERNEL);
 
 		if(!node) {
