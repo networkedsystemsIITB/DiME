@@ -145,6 +145,10 @@ function redis_run {
 	popd > /dev/null
 }
 
+function kmod_get_module_stats {
+	ssh $server_ip "cat /proc/dime_config | grep '^inst:' "
+}
+
 function run_processes {
 	pushd $ycsb_home
 		# load data to both redis and memcached
@@ -158,10 +162,7 @@ function run_processes {
 
 		wait	# wait for loading
 
-		if [ "$enable_module" == "kmod" ]; then
-			pagefaults=$(ssh $server_ip "cat /proc/dime_config | head -n2 | tail -n1 | sed 's/[ \t\r\n]\+/ /g' | cut -d' ' -f6");
-			echo "[OVERALL], pagefault_count, $pagefaults" >>  ${testfile_prefix}-redis-instance-1-load.log
-		fi
+		kmod_get_module_stats >> ${testfile_prefix}-redis-instance-1-load.log
 
 		if [ "$execute_multiple" == "yes" ]
 		then
@@ -173,11 +174,7 @@ function run_processes {
 			redis_run 1 | tee ${testfile_prefix}-redis-instance-1-run.log
 		fi
 
-		if [ "$enable_module" == "kmod" ]; then
-			pagefaults_new=$(ssh $server_ip "cat /proc/dime_config | head -n2 | tail -n1 | sed 's/[ \t\r\n]\+/ /g' | cut -d' ' -f6");
-			pagefaults_new=$((pagefaults_new-pagefaults));
-			echo "[OVERALL], pagefault_count, $pagefaults_new" >>  ${testfile_prefix}-redis-instance-1-run.log
-		fi
+		kmod_get_module_stats >> ${testfile_prefix}-redis-instance-1-run.log
 
 		ssh root@$server_ip "dmesg -c" > ${testfile_prefix}-dmesg.log
 	popd
@@ -186,19 +183,18 @@ function run_processes {
 function run_test {
 
 	resetup_everything
-	
+
+	kmod_insert_module
+
 	if [ "$enable_module" == "no" ]; then
-		kmod_remove_module
 		berk_remove_module
 		testname="test-${testcase}-insert_module-${enable_module}-execute_multiple-${execute_multiple}"
 		testfile_prefix=$curdir/$testname
 	elif [ "$enable_module" == "kmod" ]; then
 		berk_remove_module
-		kmod_insert_module
 		testname="test-${testcase}-kmod-insert_module-${enable_module}-execute_multiple-${execute_multiple}-local_npages-${kmod_local_npages}-latency-${kmod_latency_ns}-bandwidth-${kmod_bandwidth_bps}-kmod_process_in_module-${kmod_process_in_module}"
 		testfile_prefix=$curdir/$testname
 	elif [ "$enable_module" == "berk" ]; then
-		kmod_remove_module
 		berk_insert_module
 		testname="test-${testcase}-berk-insert_module-${enable_module}-execute_multiple-${execute_multiple}-remote_mem-${berk_remote_memory_gb}-latency-${berk_latency_us}"
 		testfile_prefix=$curdir/$testname
@@ -278,6 +274,9 @@ function run_single_test {
 	berk_inject_latency=1
 	enable_module="berk"
 	execute_multiple="yes"
+	kmod_local_npages=0
+	kmod_latency_ns=0
+	kmod_bandwidth_bps=10000000000000
 	for berk_remote_memory_gb in 7.4 7.2 7 6.8 6.6 6.4; # 10 20 30 40 50 60
 	do
 		run_test
@@ -291,6 +290,9 @@ function run_single_test {
 	berk_inject_latency=1
 	enable_module="berk"
 	execute_multiple="no"
+	kmod_local_npages=0
+	kmod_latency_ns=0
+	kmod_bandwidth_bps=10000000000000
 	for berk_remote_memory_gb in 7.5 7.4 7.3 7.2 7.1 7; # 10 20 30 40 50 60
 	do
 		run_test
