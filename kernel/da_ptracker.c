@@ -35,15 +35,21 @@ int pt_add(struct dime_instance_struct *dime_instance, pid_t pid) {
 
     mm = ml_get_mm_struct(pid);
     if(!mm) {
+        DA_ERROR("unable to add process, no such process : pid:%d", pid);
         return -ESRCH;   /* No such process */
     }
 
+    DA_INFO("protecting all pages of process : pid:%d", pid);
+    ml_protect_all_pages(mm);
+
     // TODO:: check if list limit is reached
 
-    dime_instance->pid[dime_instance->pid_count++] = pid;
-
-    ml_protect_all_pages(mm);
-    DA_INFO("process added to tracking list : pid:%d", pid);
+    if(pt_find(dime_instance, pid) < 0) {
+        dime_instance->pid[dime_instance->pid_count++] = pid;
+        DA_INFO("process added to tracking list : pid:%d", pid);
+    } else {
+        DA_INFO("processs was already in tracking list : pid:%d", pid);
+    }
 
     return 0;
 }
@@ -54,18 +60,19 @@ int pt_add_children(struct dime_instance_struct *dime_instance, pid_t ppid) {
     struct list_head * p;
     struct task_struct *ts;
     pid_t tmp_pid;
+    int retval;
 
-    if(pt_find(dime_instance, ppid) < 0) {
-        int retval = pt_add(dime_instance, ppid);
-        if(retval!=0)
-            return retval;
-    }
+    retval = pt_add(dime_instance, ppid);
+    if(retval!=0)
+        return retval;
 
     ts = ml_get_task_struct(ppid);
     if(!ts) {
+        DA_ERROR("unable to add process, no such process : ppid:%d", ppid);
         return -ESRCH;   /* No such process */
     }
 
+    DA_INFO("adding all processes of parent process : ppid:%d", ppid);
     list_for_each(p, &(ts->children)){
         struct task_struct *tsk = list_entry(p, struct task_struct, sibling);
         // TODO:: take tgid instead of pid
