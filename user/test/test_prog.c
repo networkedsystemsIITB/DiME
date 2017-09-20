@@ -5,7 +5,7 @@
 #include <time.h>
 
 char *pages = NULL;
-unsigned long long npages = 0, fault_count;
+unsigned long long npages = 0, fault_count, testcase;
 
 unsigned long long get_page_fault_count() {
 	FILE *f = fopen("/sys/module/kmodule/parameters/page_fault_count", "r");
@@ -36,7 +36,7 @@ void sig_handler(int signo)
 void access_all_data() {
 	unsigned long long i=0;
 	for(i=0 ; i<npages ; i++) {
-		pages[i*getpagesize()]++;
+		pages[i*getpagesize()]+=5;
 	}
 }
 void sequential_access_test() {
@@ -44,59 +44,61 @@ void sequential_access_test() {
 	unsigned long long t;
 	// sequential access
 	fault_count = 0;
-	printf("Sequential : \n\tTime taken (ms) \t: ");
+	printf("[TEST]:	Single sequential access test: \n[TEST]:	\tTime taken (ms) \t: ");
 	timer = clock();
+
 	access_all_data();
 
-	//access_all_data();
-	//access_all_data();
 	timer = clock() - timer;
 	printf("%lu\n", timer);
-	fault_count = get_page_fault_count() - fault_count;
-	printf("\tTotal page faults \t: %llu\n", fault_count);
-	t = timer;
-	fault_count = t/(fault_count==0?1:fault_count);
-	printf("\tTime per pagefault(ms) \t: %llu\n\n", fault_count);
+}
+
+void double_sequential_access_test() {
+	clock_t timer;
+	unsigned long long t;
+	// sequential access
+	fault_count = 0;
+	printf("[TEST]:	Double sequential access test: \n[TEST]:	\tTime taken (ms) \t: ");
+	timer = clock();
+
+	access_all_data();
+	access_all_data();
+
+	timer = clock() - timer;
+	printf("%lu\n", timer);
 }
 
 
-int main ( int argc, char *argv[] )
-{
+int main ( int argc, char *argv[] ) {
 	unsigned long long i=0;
 	clock_t timer;
 
 	if(argc < 2) {
-		printf("number of pages required\n");
+		printf("[TEST]:	number of pages required\n");
 		exit(1);
-	}
+	} else if(argc < 3) {
+		printf("[TEST]:	testcase number required\n");
+		exit(1);
+	} 
 
-	printf("PID : %d\n", getpid());
+	printf("[TEST]:	PID of this process : %d\n", getpid());
 	
 	sscanf(argv[1], "%llu", &npages);
-	printf("Allocating %llu pages\n", npages);
+	sscanf(argv[2], "%llu", &testcase);
+	printf("[TEST]:	Allocating %llu pages\n", npages);
 	pages = (char*)malloc(getpagesize()*npages);
 	if(!pages) {
-		printf("error in allocating pages\n");
+		printf("[TEST]:	error in allocating pages\n");
 		exit(2);
 	}
-/*
-	// Access all once before starting
-	printf("First dry run..\n\n");
-	access_all_data();
-
-	// Sequence access
-	printf("Run tests before module insertion : \n");
-	sequential_access_test();
-*/
-
 
 	// Wait for module to insert and signal from user space
-	printf("Send signal to start tests..\n");
+	printf("[TEST]:	Send signal to start tests..\n");
 
 
 	// Register user signal
     if (signal(SIGUSR1, sig_handler) == SIG_ERR) {
-        printf("\ncan't catch SIGUSR1\n");
+        printf("\n[TEST]:	can't catch SIGUSR1\n");
         return 1;
     }
 
@@ -111,30 +113,18 @@ void start_test() {
 	unsigned long long i=0, r=0;
 	clock_t timer;
 
-	printf("Assumming module inserted and setup.\n");
+	printf("[TEST]:	Assumming module inserted and setup.\n");
+	printf("[TEST]:	Starting testcase %llu.\n", testcase);
 
-	sequential_access_test();
-
-/*
-	// only one page
-	timer = clock();
-	r = 20;
-	for(i=0 ; i<npages ; i++) {
-		pages[getpagesize()*r]++;
+	switch(testcase) {
+		case 1:
+			sequential_access_test();
+			break;
+		case 2:
+			double_sequential_access_test();
+			break;
+		default:
+			printf("[TEST]:	ERROR: Unable to run testcase : %llu.\n", testcase);
+			break;
 	}
-	timer = clock() - timer;
-	printf("Single page : Time taken : %lu\n", timer);
-
-
-	// two pages
-	timer = clock();
-	r = 200;
-	for(i=0 ; i<npages ; i+=r) {
-		int j;
-		for (j=0 ; j<r ; ++j) {
-			pages[getpagesize()*(r)]++;
-		}
-	}
-	timer = clock() - timer;
-	printf("Two pages alternate : Time taken : %lu\n", timer);*/
 }
