@@ -264,6 +264,8 @@ int do_page_fault_hook_end_new (struct pt_regs *regs,
                             int * hook_flag,
                             ulong * hook_timestamp) {
     ulong delay_ns;
+    pte_t * ptep = NULL;
+    int index;
     //int count=0;
 
     // Check if hook_flag was set in start hook
@@ -284,6 +286,20 @@ int do_page_fault_hook_end_new (struct pt_regs *regs,
                 //count++;
             }
 
+           /* ptep = ml_get_ptep(current->mm, address);
+            index=0;
+            if(ptep) {
+                if(pte_exec(*ptep)) {
+                    index = index | 1;
+                    index = index | 4;
+                }
+                if(pte_write(*ptep)) {
+                    index = index | 2;
+                    index = index | 4;
+                }
+                dime_instance->page_fault_count_prot[index]++;
+            }*/
+            
             vma = find_vma(current->mm, address);
             if(vma) {
                 ulong flag = vma->vm_flags & (VM_READ | VM_WRITE | VM_EXEC | VM_SHARED);
