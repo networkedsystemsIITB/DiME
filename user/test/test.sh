@@ -77,7 +77,7 @@ do
 	# Calculate execution time
 	diff_time_ns=$(bc -l <<< "scale=2; $end_time_ns - $start_time_ns")
 	diff_time_ms=$(bc -l <<< "scale=2; $diff_time_ns / 1000")
-	page_fault_count=`cat /sys/module/kmodule/parameters/page_fault_count`
+	page_fault_count=`cat /proc/dime_config | grep "$pid," | awk '{print $5}'`
 	if [ $page_fault_count -eq 0 ]
 	then
 	    page_fault_count=1
