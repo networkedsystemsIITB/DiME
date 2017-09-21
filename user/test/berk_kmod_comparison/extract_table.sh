@@ -1,6 +1,6 @@
 #!/bin/bash
 declare -A pairs
-for f in `ls *redis*instance-1*run*log`; 
+for f in `ls *instance-1*run*log`; 
 do
 	#echo -n $f | tr '_.' ' ' | awk '{print $2 "\t" $3 "\t" $7 "\t" $9 "\t" $11 "\t" $12;}' | tr "\n" '\t';
 	echo -n $f | tr '-' ' ';
