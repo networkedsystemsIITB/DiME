@@ -44,57 +44,62 @@ then
 	exit 1
 fi
 
-for testcase in {1..2};
+for testcase in {2..2}; ############################################################# test case 1..2
 do
-	# Remove DiME module
-	echo "[SH]:	Initialing modules..."
-	initialize
+	for last_npages in { 0 100 200 300 400 500 600 700 800 900 1000 1100 1200 1300 1400 1500 1600 1700 1800 1900 2000 }
+	do
+		# Remove DiME module
+		echo "[SH]:	Initialing modules..."
+		initialize
 
-	$SCRIPT_PATH/test_prog $1 $testcase &
-	pid=$!
-	if [ "$pid" == "" ]
-	then
-	    echo "[SH]:	Could not find test program"
-	    exit 1
-	fi
-	pstree -ps `ps aux | grep "test_prog" | grep -v "/bin/bash" | awk '{print $2;}' | head -n1`
+		$SCRIPT_PATH/test_prog $1 $testcase $last_npages &
+		pid=$!
+		if [ "$pid" == "" ]
+		then
+		    echo "[SH]:	Could not find test program"
+		    exit 1
+		fi
+		pstree -ps `ps aux | grep "test_prog" | grep -v "/bin/bash" | awk '{print $2;}' | head -n1`
 
-	echo "[SH]:	PID of background process : $pid"
+		echo "[SH]:	PID of background process : $pid"
 
-	# Insert DiME module with this PID
-	echo "[SH]:	Inserting DiME module.."
-	insmod $SCRIPT_PATH/../../kernel/kmodule.ko
-	echo "instance_id=0 pid=$pid latency_ns=$latency_ns local_npages=$local_npages bandwidth_bps=$bandwidth_bps" > /proc/dime_config
-	echo "[SH]:	Inserting FIFO policy module.."
-	insmod $SCRIPT_PATH/../../kernel/prp_fifo_module.ko
+		# Insert DiME module with this PID
+		echo "[SH]:	Inserting DiME module.."
+		insmod $SCRIPT_PATH/../../kernel/kmodule.ko
+		echo "instance_id=0 pid=$pid latency_ns=$latency_ns local_npages=$local_npages bandwidth_bps=$bandwidth_bps" > /proc/dime_config
+		echo "[SH]:	Inserting FIFO policy module.."
+		insmod $SCRIPT_PATH/../../kernel/prp_fifo_module.ko
+		echo "[SH]:	FIFO policy module inserted, ready to send signal.."
+		#cat /proc/$pid/maps
+		read -r
 
-	# Start testcase
-	start_time_ns=`date +%s%N`
-	sudo pkill -USR1 test_prog
-	wait $pid
-	end_time_ns=`date +%s%N`
+		# Start testcase
+		start_time_ns=`date +%s%N`
+		sudo pkill -USR1 test_prog
+		wait $pid
+		end_time_ns=`date +%s%N`
 
-	# Calculate execution time
-	diff_time_ns=$(bc -l <<< "scale=2; $end_time_ns - $start_time_ns")
-	diff_time_ms=$(bc -l <<< "scale=2; $diff_time_ns / 1000")
-	page_fault_count=`cat /proc/dime_config | grep "$pid," | awk '{print $5}'`
-	if [ $page_fault_count -eq 0 ]
-	then
-	    page_fault_count=1
-	fi
-	actual_delay_per_fault_ms=$(bc -l <<< "scale=2; $diff_time_ns / 1000 / $page_fault_count")
-	expected_delay_per_fault_ms=$(bc -l <<< "scale=2; 2 * $latency_ns / 1000 + 4096 * 8 * 1000000 / $bandwidth_bps")
+		# Calculate execution time
+		diff_time_ns=$(bc -l <<< "scale=2; $end_time_ns - $start_time_ns")
+		diff_time_ms=$(bc -l <<< "scale=2; $diff_time_ns / 1000")
+		page_fault_count=`cat /proc/dime_config | grep "$pid," | awk '{print $5}'`
+		if [ $page_fault_count -eq 0 ]
+		then
+		    page_fault_count=1
+		fi
+		actual_delay_per_fault_ms=$(bc -l <<< "scale=2; $diff_time_ns / 1000 / $page_fault_count")
+		expected_delay_per_fault_ms=$(bc -l <<< "scale=2; 2 * $latency_ns / 1000 + 4096 * 8 * 1000000 / $bandwidth_bps")
 
-	#echo "Total execution time(ns)         : $diff_time_ns ns"
-	echo -e "\n\n\nCommand execution completed, statistics :"
-	echo "Total execution time              : $diff_time_ms ms"
-	echo "Number of page faults             : $page_fault_count"
-	echo "Actual delay per page fault       : $actual_delay_per_fault_ms ms"
-	echo "Expected delay per page fault     : $expected_delay_per_fault_ms ms"
+		#echo "Total execution time(ns)         : $diff_time_ns ns"
+		echo -e "\n\n\nCommand execution completed, statistics :"
+		echo "Total execution time              : $diff_time_ms ms"
+		echo "Number of page faults             : $page_fault_count"
+		echo "Actual delay per page fault       : $actual_delay_per_fault_ms ms"
+		echo "Expected delay per page fault     : $expected_delay_per_fault_ms ms"
 
-	# Print dime config stats
-	echo "[SH]:	DiME config stats:"
-	cat /proc/dime_config
-
+		# Print dime config stats
+		echo "[SH]:	DiME config stats:"
+		cat /proc/dime_config
+	done;
 done;
 
