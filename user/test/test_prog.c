@@ -5,7 +5,7 @@
 #include <time.h>
 
 char *pages = NULL;
-unsigned long long npages = 0, fault_count, testcase;
+unsigned long long npages = 0, fault_count, testcase, last_npages;
 
 unsigned long long get_page_fault_count() {
 	FILE *f = fopen("/sys/module/kmodule/parameters/page_fault_count", "r");
@@ -36,36 +36,51 @@ void sig_handler(int signo)
 void access_all_data() {
 	unsigned long long i=0;
 	for(i=0 ; i<npages ; i++) {
-		pages[i*getpagesize()]+=5;
+		pages[i*getpagesize()+100]+=5;
 	}
 }
+
+void access_last_data(unsigned long long last_npages) {
+	unsigned long long i=0;
+	for(i=npages-last_npages ; i<npages ; i++) {
+		pages[i*getpagesize()+100]+=5;
+	}
+}
+
 void sequential_access_test() {
 	clock_t timer;
 	unsigned long long t;
 	// sequential access
 	fault_count = 0;
-	printf("[TEST]:	Single sequential access test: \n[TEST]:	\tTime taken (ms) \t: ");
+	printf("[TEST]:	Single sequential access test: \n[TEST]:	\t\tTime taken (ms) \t: ");
 	timer = clock();
 
 	access_all_data();
 
 	timer = clock() - timer;
 	printf("%lu\n", timer);
+	printf("TEST]:	\tExpected pagefault count \t: %llu", npages);
 }
 
 void double_sequential_access_test() {
+	unsigned long long exp_pfcount = 0;
 	clock_t timer;
 	unsigned long long t;
 	// sequential access
 	fault_count = 0;
-	printf("[TEST]:	Double sequential access test: \n[TEST]:	\tTime taken (ms) \t: ");
+	printf("[TEST]:	Re-accessing last %llu pages: \n[TEST]:	\t\tTime taken (ms) \t: ", last_npages);
 	timer = clock();
 
 	access_all_data();
-	access_all_data();
+	access_last_data(last_npages);
 
 	timer = clock() - timer;
 	printf("%lu\n", timer);
+	/*if(npages <= 1000)
+		exp_pfcount = npages;
+	else
+		exp_pfcount = 2*npages;
+	printf("TEST]:	\tExpected pagefault count \t: %llu", exp_pfcount);*/
 }
 
 
@@ -85,6 +100,13 @@ int main ( int argc, char *argv[] ) {
 	
 	sscanf(argv[1], "%llu", &npages);
 	sscanf(argv[2], "%llu", &testcase);
+	if(testcase==2) {
+		if(argc < 4) {
+			printf("[TEST]:	number of pages to access last required\n");
+			exit(1);
+		}
+		sscanf(argv[3], "%llu", &last_npages);
+	}
 	printf("[TEST]:	Allocating %llu pages\n", npages);
 	pages = (char*)malloc(getpagesize()*npages);
 	if(!pages) {
