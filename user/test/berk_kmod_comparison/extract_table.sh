@@ -1,14 +1,25 @@
 #!/bin/bash
-
-for f in `ls *redis*run*log`; 
+for f in `ls *instance-1*run*log`; 
 do
-	#echo -n $f | tr '_.' ' ' | awk '{print $2 "\t" $3 "\t" $7 "\t" $9 "\t" $11 "\t" $12;}' | tr "\n" '\t';
 	echo -n $f | tr '-' ' ';
+	echo -n " throughput " ; 
 	cat $f | grep "Throughput(ops/sec)" | awk -v FS='[ ,]+' '{print " ", $3;}' | tr "\n" '\t';
-	pagefaults=`cat $f | grep "pagefault" | awk -v FS='[ ,]+' '{print " ", $3;}'`
-	echo "$pagefaults";
-	
-done;
 
-# to take average of all tests
-#../extract_table.sh | awk -F"\t" '{array[$2"\t"$3"\t"$4"\t"$5]+=$6; count[$2"\t"$3"\t"$4"\t"$5]+=1;} END { for (i in array) {print i"\t" array[i]/count[i]}}'
+	logfile=$f
+	page_faults_inst0_run=$(grep "instance_id" -A1 $logfile | awk '{if($1=="0"){print $5}}');
+	logfile=$(echo $f | sed 's/-run/-load/g')
+	page_faults_inst0_load=$(grep "instance_id" -A1 $logfile | awk '{if($1=="0"){print $5}}');
+	page_faults_inst0=$((page_faults_inst0_run - page_faults_inst0_load))
+	echo -n " pfcount:0 ${page_faults_inst0}";
+
+	if [ $(echo $f | grep "kmod_process_in_module-separate" | wc -l) -gt 0 ];
+	then
+		logfile=$f
+		page_faults_inst1_run=$(grep "instance_id" -A2 $logfile  | awk '{if($1=="1"){print $5}}');
+		logfile=$(echo $f | sed 's/-run/-load/g')
+		page_faults_inst1_load=$(grep "instance_id" -A2 $logfile  | awk '{if($1=="1"){print $5}}');
+		page_faults_inst1=$((page_faults_inst1_run - page_faults_inst1_load))
+		echo -n " pfcount:1 ${page_faults_inst1}";
+	fi
+	echo ""
+done;
