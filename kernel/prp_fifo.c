@@ -111,11 +111,11 @@ int lpl_AddPage(struct dime_instance_struct *dime_instance, struct mm_struct * m
 	if (dime_instance->local_npages == 0) {
 		// no need to add this address
 		// we can treat this case as infinite local pages, and no need to inject delay on any of the page
-		ret_execute_delay = 0;
+		ret_execute_delay = 1;
 		return ret_execute_delay;
 	} else if (dime_instance->local_npages > prp_fifo->lpl_count) {
 		// Since there is still free space locally for remote pages, delay should not be injected
-		ret_execute_delay = 0;
+		ret_execute_delay = 1;
 		node = (struct lpl_node_struct*) kmalloc(sizeof(struct lpl_node_struct), GFP_KERNEL);
 
 		if(!node) {
@@ -155,10 +155,11 @@ int lpl_AddPage(struct dime_instance_struct *dime_instance, struct mm_struct * m
 	return ret_execute_delay;
 }
 
-struct prp_fifo_struct prp_fifo;
+//struct prp_fifo_struct prp_fifo;
 
 void lpl_Init(struct dime_instance_struct *dime_instance) {
-	prp_fifo = (struct prp_fifo_struct) {
+	struct prp_fifo_struct *prp_fifo = to_prp_fifo_struct(dime_instance->prp);
+	*prp_fifo = (struct prp_fifo_struct) {
 		.prp = {
 			.add_page 	= lpl_AddPage,
 			.clean 		= lpl_CleanList,
@@ -166,8 +167,8 @@ void lpl_Init(struct dime_instance_struct *dime_instance) {
 		.lpl_count = 0,
 	};
 
-	prp_fifo.lpl_head = (struct list_head) { &(prp_fifo.lpl_head), &(prp_fifo.lpl_head) };
-	rwlock_init(&prp_fifo.lock);
+	prp_fifo->lpl_head = (struct list_head) { &(prp_fifo->lpl_head), &(prp_fifo->lpl_head) };
+	rwlock_init(&(prp_fifo->lock));
 }
 
 
@@ -191,20 +192,36 @@ void lpl_CleanList (struct dime_instance_struct *dime_instance) {
 
 int init_module(void) {
 	int ret = 0;
+	int i;
     DA_ENTRY();
 
-    lpl_Init(NULL);
+    for(i=0 ; i<dime.dime_instances_size ; ++i) {
+    	struct prp_fifo_struct *prp_fifo = (struct prp_fifo_struct*) kmalloc(sizeof(struct prp_fifo_struct), GFP_KERNEL);
+		if(!prp_fifo) {
+			DA_ERROR("unable to allocate memory");
+			return -1; // TODO:: Error codes
+		}
 
-    ret = register_page_replacement_policy(&prp_fifo.prp);
+		dime.dime_instances[i].prp = &(prp_fifo->prp);
+	    lpl_Init(&dime.dime_instances[i]);
+	}
+
+    ret = register_page_replacement_policy(NULL);
 
     DA_EXIT();
     return ret;    // Non-zero return means that the module couldn't be loaded.
 }
 void cleanup_module(void) {
+	int i;
     DA_ENTRY();
 
-    deregister_page_replacement_policy(&prp_fifo.prp);
-    __lpl_CleanList(&prp_fifo);
+
+    for(i=0 ; i<dime.dime_instances_size ; ++i) {
+    	lpl_CleanList(&dime.dime_instances[i]);
+		dime.dime_instances[i].prp = NULL;
+	}
+
+    deregister_page_replacement_policy(NULL);
 
     DA_INFO("cleaning up module complete");
     DA_EXIT();
