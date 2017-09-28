@@ -24,6 +24,7 @@
 #include "da_config.h"
 #include "common.h"
 
+EXPORT_SYMBOL(dime);
 unsigned int da_debug_flag =    DA_DEBUG_ALERT_FLAG | 
                                 DA_DEBUG_INFO_FLAG | 
                                 DA_DEBUG_WARNING_FLAG | 
@@ -285,33 +286,29 @@ int do_page_fault_hook_end_new (struct pt_regs *regs,
     return 0;
 }
 
+// TODO:: no use of prp here, remove or rename function
 int register_page_replacement_policy(struct page_replacement_policy_struct *prp) {
     int i, j;
     
     // initialize processes
+    // TODO:: register unregister functions can be developed with more simplification,
+    //        separate policy for separate instances 
     if (pt_init_ptracker() != 0) {
         return -1; // TODO:: valid error code
     }
 
     for (j=0 ; j<dime.dime_instances_size ; ++j) {
-        if(dime.dime_instances[j].prp) {
-            DA_ERROR("page replacement policy already registered, please remove any existing policy module first");
-            //return -EPERM;  // Operation not permitted
-        } else {
-            dime.dime_instances[j].prp = prp;
+        for(i=0 ; i<dime.dime_instances[j].pid_count ; ++i) {
+            DA_INFO("adding process %d to tracking", dime.dime_instances[j].pid[i]);
 
-            for(i=0 ; i<dime.dime_instances[j].pid_count ; ++i) {
-                DA_INFO("adding process %d to tracking", dime.dime_instances[j].pid[i]);
-
-                pt_add_children(&dime.dime_instances[j], dime.dime_instances[j].pid[i]);
-            }
+            pt_add_children(&dime.dime_instances[j], dime.dime_instances[j].pid[i]);
         }
     }
     return 0;
 }
 
 int deregister_page_replacement_policy(struct page_replacement_policy_struct *prp) {
-    int j;
+    /*int j;
 
     for (j=0 ; j<dime.dime_instances_size ; ++j) {
         if(dime.dime_instances[j].prp != prp) {
@@ -320,7 +317,7 @@ int deregister_page_replacement_policy(struct page_replacement_policy_struct *pr
         } else {
             dime.dime_instances[j].prp = NULL;
         }
-    }
+    }*/
 
     pt_exit_ptracker();
     return 0;
