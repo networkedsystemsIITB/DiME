@@ -27,7 +27,7 @@ do
 		#echo -n " ${instid}-${perm} ${pairs[${instid}-${perm}]}";
 	done;
 
-	if [ $(echo $f | grep "kmod_process_in_module-separate" | wc -l) -gt 0 ];
+	if [ $(echo $f | grep "kmod-test_mode-separate" | wc -l) -gt 0 ];
 	then
 		cat $f | grep '^inst: 1' | while read -r line;
 		do
