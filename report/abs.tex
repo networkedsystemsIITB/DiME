@@ -1,8 +1,6 @@
 %============================= abs.tex================================
 \begin{Abstract}
-Disaggregating various resources is the recent trend in datacenter architectures, where resources of same type are disaggregated in resource pools, e.g. compute resource, storage resource, network resource, memory resource. Disaggregation helps in efficient use of power and resources by sharing among disaggregated servers based on their usage patterns. 
-
-We aim to emulate disaggregated memory for a process, so that application developers can use the emulator in development process for testing purpose to make application more efficient in disaggregated environment.
+Disaggregating various resources is the recent trend in data center architectures, where resources of same type are disaggregated in resource pools, e.g. compute, storage, network and memory. Disaggregation helps in efficient use of power and resources by sharing among servers based on their usage patterns. Since disaggregated resources are shared over external communication link, it can have significant impact on application performance based on the access pattern. Due to unavailability of disaggregated memory hardware, it is difficult for application developers to evaluate the optimizations. We aim to emulate disaggregated memory for a process, so that application developers can use the emulator in development process for testing purpose to make application more efficient in disaggregated environment. We develop a tool, {\dime}, to have more fine-grained control over emulator configurations compared to previously proposed emulators and show its features and usefulness by extensive testing using popular workloads.
 %
 %
 %

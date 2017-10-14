@@ -4,12 +4,23 @@
 
 \chapter{Introduction}
 
-Traditional datacenters are built of collection of servers, and each server has dedicated resources, which are memory, cpu, non-volatile storage (SSD, HDD), network, etc. Per-server memory demands are increasing due to large-memory applications. Leading to more power to operate the memory. A new memory architecture is required to efficiently use the available memory. By disaggregating memory, multiple compute blades can connect to a single memory blade and dynamically share its capacity, resulting in decreased memory requirement and lower power consumption.
+Traditional data centers are built of collection of servers, and each server has dedicated resources, which are memory, cpu, non-volatile storage (SSD, HDD), network, etc. This tight coupling of resources makes it difficult to manage and use resources efficiently. For example, a memory intensive application running on a server cannot make use of memory on another server which is not being used, resulting overall under utilization of memory in data center. Also, per-server memory demands are increasing due to memory intensive applications, leading to more power to operate the memory. A new memory architecture is required to efficiently use the available memory. By disaggregating resources, multiple compute blades can connect to a single global pool of independent resource and dynamically share its capacity over high speed backplane network, resulting in decreased memory requirement, increased utilization and lower power consumption. Disaggregated architecture also helps scale and maintain each resource independently.
 
-We have produced a linux kernel module which tracks the memory accesses by a process and emulates the delay caused by transferring remote memory data to local memory.
+\section{Motivation}
+The reason that the access latency of memory in traditional servers is in few nanoseconds, whereas it is few microseconds in case of disaggregated architecture, makes it reasonable to consider partial disaggregation. Each compute node owns a small portion of memory at local, instead of completely decoupling memory with compute node. The performance drop in case of disaggregated memory will depend upon relative location of remote memory, bandwidth of network, size of local memory and access pattern of the application. Applications can make use of knowledge of disaggregated memory by carefully placing the data in remote or local memory based on the requirement to improve performance. It is also possible to make the disaggregation transparent to applications and make operating system take the responsibility of data placement. In any case, we need to verify the efficiency of method on hardware prototype. Since disaggregated memory is still in open research, the non availability of hardware prototype makes implementation and validation of placement techniques difficult. 
 
+Earlier work propose emulators which lack fine-grained control over emulator features e.g. page based memory placement, local memory management algorithms, etc. Our tool, {\dime}, works as a Linux kernel module, traps accesses to remote memory and injects appropriate delay based on emulator configuration and also provide users flexibility to implement their own local memory management policy. In addition to features, flexibility and emulation accuracy, {\dime} also provide low emulator overhead compared to other existing emulators. We evaluate our emulator with memory intensive applications such as redis and memcached, and show that the results are expected based on specified configuration. We also demonstrate how {\dime} provide fine-grained control over delay injection based on specific accessed page.
 
+\section{Contribution}
+This project is the extension of R\&D project done by me and my friend Trishal Patel. We had developed a basic prototype of the emulator as proof of concept.
 
+The following contribution have been made by me towards the completion of this project:
+\begin{itemize}
+	\item Design and implementation of multiple emulator instances, modularization of page replacement policies, procfs based dynamic configuration, process tracker feature
+	\item Explored and evaluated different methods to introduce delays in execution flow
+	\item Explored impact of CPU cache and TLB on emulation accuracy, and patched emulator
+	\item Verified emulator correctness and accuracy by evaluating multiple test cases
+\end{itemize}
 %%
 
 

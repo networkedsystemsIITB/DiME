@@ -18,6 +18,8 @@
   implementation/main,
   lit/literature,
   expt/experimental,
+  evaluation/evaluation,
+  future_work/future_work,
   rnd/results, 
   dec,abs,pub,ack
 }
@@ -28,6 +30,13 @@
 
 \usepackage{multirow}
 \usepackage{booktabs}
+\usepackage{listings}
+\usepackage{graphicx,array}
+\usepackage{epstopdf}
+\usepackage{svg}
+\usepackage{subcaption}
+\usepackage{url}
+\captionsetup{subrefformat=parens} % will result in references (typeset with \ref) like  1a  but sub-references (typeset with\subref) like  (a)
 \graphicspath{{expt/}}
 
 
@@ -42,6 +51,14 @@
 \newcommand{\Tabref}[1]{Table~\ref{#1}}
 \newcommand{\Figref}[1]{Figure~\ref{#1}}
 \newcommand{\Appref}[1]{Appendix~\ref{#1}}
+%\newcommand{\dime}{{DiME~}}
+\newcommand{\dime}{{DiME}}
+\newcommand{\isep}{-2 pt}
+
+
+\newcommand{\subfigANDtitle}[2][.2\linewidth]{%
+	\begin{tabular}{@{}>{\centering\arraybackslash}p{#1}@{}} #2 \end{tabular}
+}
 
 
 \begin{document}
@@ -54,19 +71,19 @@
 %*******************************************************************
 %                         Title Page                            
 %*******************************************************************
-\title{Memory Disaggregation Emulator}
+\title{DiME: A Performance Emulator for Disaggregated Memory Architectures}
 \author{Abhishek Ghogare}
 
 %% Print the date. Today's date comes by default, change it here to 
 %% other date format, if required:
 
 %\date{\today}
-%\date{10 Mar 2016}
+\date{October 2017}
 
 
 %% The type of the report can be set here
 
-\reporttype{A R\&D Project Report}
+\reporttype{Master's Thesis Phase I}
 %\reporttype{A Thesis}
 %\reporttype{A Dissertation}
 %\reporttype{A Project Report}
@@ -96,8 +113,8 @@
 %                        Certificate Page                         
 %*******************************************************************
 %\makecertificate[change title name]{report type} 
-\makecertificate{R\&D report} 
-%\makecertificate{thesis}
+%\makecertificate{R\&D report} 
+\makecertificate{master's thesis}
 %\makecertificate{dissertation}
 %\makecertificate{project report}
 
@@ -114,6 +131,11 @@
 %*******************************************************************
 \include{dec} 
 %\addintoc{Declaration}
+
+%*******************************************************************
+%                         List of publications               
+%******************************************************************
+\include{pub}        
 
 %******************************************************************
 %                          Abstract                             
@@ -140,23 +162,25 @@
 \include{intro/introduction}
 \include{assumption/assumption}
 \include{implementation/main}
+\include{evaluation/evaluation}
+\include{future_work/future_work}
 %\include{expt/experimental}
 %\include{rnd/results}
 
 %******************************************************************
 %                         Bibliography or References          
 %******************************************************************  
-\bibliography{mylit}     
 
-%*******************************************************************
-%                         List of publications               
-%******************************************************************
-%\include{pub}            
+\bibliographystyle{abbrv}
+%\bibliographystyle{apalike}
+%\bibliographystyle{sig-alternate}
+\bibliography{mainrep}
+    
 
 %*******************************************************************
 %                        Acknowledgements                    
 %******************************************************************* 
-\include{ack}           
+%\include{ack}           
 
 %*******************************************************************
 %                        About author                    

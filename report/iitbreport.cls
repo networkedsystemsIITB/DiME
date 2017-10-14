@@ -186,7 +186,7 @@
 \let\mybibliography\bibliography
 \renewcommand{\bibliography}[1]{\makeheadtoc{References}\mybibliography{#1}}
 
-\bibliographystyle{iitbauthyr}
+%\bibliographystyle{iitbauthyr}
 
 %******************header-footer from fancyhdr.sty******************
 \pagestyle{fancy}
