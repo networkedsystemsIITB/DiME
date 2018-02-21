@@ -19,17 +19,17 @@
 #include "../common/da_debug.h"
 
 #include "da_mem_lib.h"
-#include "da_local_page_list.h"
 #include "da_ptracker.h"
 #include "da_config.h"
 #include "common.h"
 
 EXPORT_SYMBOL(dime);
-unsigned int da_debug_flag =    DA_DEBUG_ALERT_FLAG | 
-                                DA_DEBUG_INFO_FLAG | 
-                                DA_DEBUG_WARNING_FLAG | 
-                                DA_DEBUG_ERROR_FLAG | 
-                                DA_DEBUG_ENTRYEXIT_FLAG;
+unsigned int da_debug_flag =    DA_DEBUG_ALERT_FLAG
+                                | DA_DEBUG_INFO_FLAG
+                                | DA_DEBUG_WARNING_FLAG
+                                | DA_DEBUG_ERROR_FLAG
+                                //| DA_DEBUG_ENTRYEXIT_FLAG
+                                ;
 EXPORT_SYMBOL(da_debug_flag);
 
 /*****
@@ -131,17 +131,6 @@ MODULE_PARM_DESC(page_fault_count, "Number of total page faults");
 struct dime_struct dime = {
     .dime_instances_size = 0
 };
-//export dime;
-
-/*
-// TODO:: remove dime_instance ....................................../////////////////////////////////////////////////////////////////////
-struct dime_instance_struct dime_instance = {
-    .instance_id        = 0,
-    .pid_count          = 0,
-    .page_fault_count   = 0,
-    .prp                = NULL,
-};
-*/
 
 /*****
  *
@@ -150,24 +139,19 @@ struct dime_instance_struct dime_instance = {
  *  Description:
  *      initialize & cleanup modules
  */
-int init_module(void)
-{
+int init_module(void) {
+    int ret = 0;
     int i;
-    extern void (*flush_tlb_page_fp) (struct vm_area_struct *, unsigned long);
-    unsigned long fp = 0;
     DA_ENTRY();
 
     if(init_dime_config_procfs()) {
-        return -1; // TODO:: Error codes
+        ret = -1; // TODO:: Error codes
+        goto init_bad;
     }
 
-    fp = kallsyms_lookup_name("flush_tlb_page");
-    if(fp==0) {
-        DA_ERROR("Could not find symbol flush_tlb_page");
-        flush_tlb_page_fp = NULL;
-        return -1;  // TODO:: Error codes
-    } else {
-        flush_tlb_page_fp = (void (*) (struct vm_area_struct *, unsigned long ))fp;
+    if(init_mem_lib()) {
+        ret = -1; // TODO:: Error codes
+        goto init_bad;
     }
 
     HOOK_START_FN_NAME  = do_page_fault_hook_start_new;
@@ -187,14 +171,14 @@ int init_module(void)
 
     goto init_good;
 
-init_reset_hook:
+init_bad:
     HOOK_START_FN_NAME  = NULL;
     HOOK_END_FN_NAME    = NULL;
+    DA_ERROR("failed to initialize, exiting");
 
 init_good:
-
     DA_EXIT();
-    return 0;    // Non-zero return means that the module couldn't be loaded.
+    return ret;    // Non-zero return means that the module couldn't be loaded.
 }
 void cleanup_module(void)
 {
@@ -209,6 +193,7 @@ void cleanup_module(void)
         if (dime.dime_instances[i].prp)
             dime.dime_instances[i].prp->clean(&dime.dime_instances[i]);
     }
+    cleanup_mm_lib();
     DA_INFO("cleaning up module complete");
     DA_EXIT();
 }
@@ -230,7 +215,6 @@ int do_page_fault_hook_start_new (struct pt_regs *regs,
     if(address != 0ul && (dime_instance = pt_get_dime_instance_of_pid(&dime, current->tgid)) != NULL) {
         // Start timer now, to calculate page fetch delay later
         *hook_timestamp = sched_clock();
-
 
         if (!ml_is_present(current->mm, address)) { // TODO :: pages are not seen as protected, so add all the pages to list, problem is there might be duplecate entries in the local page list
             /*pte_t* ptep = ml_get_ptep(current->mm, address);
