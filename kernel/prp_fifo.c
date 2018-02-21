@@ -32,9 +32,12 @@ MODULE_AUTHOR("Abhishek Ghogare, Dhantu");
 MODULE_DESCRIPTION("Dime FIFO page replacement policy");
 
 
-static struct prp_fifo_struct *to_prp_fifo_struct(struct page_replacement_policy_struct *prp)
-{
-	return container_of(prp, struct prp_fifo_struct, prp);
+static struct prp_fifo_struct *to_prp_fifo_struct(struct page_replacement_policy_struct *prp) {
+	struct prp_fifo_struct *ret = NULL;
+	DA_ENTRY();
+	ret = container_of(prp, struct prp_fifo_struct, prp);
+	DA_EXIT();
+	return ret;
 }
 
 /*int lpl_Initialize(ulong size) {

@@ -3,13 +3,6 @@
 
 #include "common.h"
 
-struct lpl_node_struct {
-	struct list_head list_node;
-	
-	ulong address;
-	pid_t pid;
-};
-
 struct prp_fifo_struct {
 	struct page_replacement_policy_struct prp;
 

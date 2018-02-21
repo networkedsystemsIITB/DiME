@@ -28,6 +28,14 @@ struct dime_struct {
 	int dime_instances_size;
 };
 
+struct lpl_node_struct {
+	struct list_head list_node;
+	
+	ulong address;
+	pid_t pid;
+};
+
+
 extern struct dime_struct dime;
 
 
