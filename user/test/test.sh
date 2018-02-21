@@ -1,5 +1,10 @@
 #!/bin/bash
 
+# Config parameters
+prp_module="prp_lru_module"
+
+
+
 function remove_dime_module {
 	if [ `lsmod | grep kmodule | wc -l` -gt 0 ] 
 	then 
@@ -8,18 +13,18 @@ function remove_dime_module {
 	fi
 }
 
-function remove_fifo_policy_module {
-	if [ `lsmod | grep prp_fifo_module | wc -l` -gt 0 ] 
+function remove_prp_module {
+	if [ `lsmod | grep $prp_module | wc -l` -gt 0 ] 
 	then 
-	    echo "[SH]:	Removing FIFO policy module.."
-	    rmmod prp_fifo_module || exit 1
+	    echo "[SH]:	Removing $prp_module policy module.."
+	    rmmod $prp_module || exit 1
 	fi
 }
 
 function initialize {
 	echo never > /sys/kernel/mm/transparent_hugepage/enabled
 
-	remove_fifo_policy_module
+	remove_prp_module
 	remove_dime_module
 }
 
@@ -46,7 +51,7 @@ fi
 
 for testcase in {2..2}; ############################################################# test case 1..2
 do
-	for last_npages in 0 10 20 30 40 50 60 70 80 90 100;
+	for last_npages in 20; #############################################################0 10 20 30 40 50 60 70 80 90 100;
 	do
 		# Remove DiME module
 		echo "[SH]:	Initialing modules..."
@@ -71,9 +76,9 @@ do
 		insmod $SCRIPT_PATH/../../kernel/kmodule.ko
 		echo "instance_id=0 pid=$pid1 latency_ns=$latency_ns local_npages=$local_npages bandwidth_bps=$bandwidth_bps" > /proc/dime_config
 		echo "instance_id=1 pid=$pid2 latency_ns=$latency_ns local_npages=$local_npages bandwidth_bps=$bandwidth_bps" > /proc/dime_config
-		echo "[SH]:	Inserting FIFO policy module.."
-		insmod $SCRIPT_PATH/../../kernel/prp_fifo_module.ko
-		echo "[SH]:	FIFO policy module inserted, ready to send signal.."
+		echo "[SH]:	Inserting $prp_module policy module.."
+		insmod $SCRIPT_PATH/../../kernel/${prp_module}.ko
+		echo "[SH]:	$prp_module policy module inserted, ready to send signal.."
 		#cat /proc/$pid/maps
 		read -r
 
