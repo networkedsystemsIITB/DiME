@@ -3,8 +3,9 @@ CONFIG_MODULE_SIG_ALL=n
 
 EXTRA_CFLAGS := -I./
 
-obj-m += kmodule.o prp_fifo_module.o
-prp_fifo_module-objs += prp_fifo.o da_mem_lib.o
+obj-m += kmodule.o prp_fifo_module.o prp_lru_module.o 
+prp_fifo_module-objs += prp_fifo.o
+prp_lru_module-objs += prp_lru.o
 kmodule-objs += da_mem_lib.o da_kmodule.o da_ptracker.o da_config.o
 
 all:

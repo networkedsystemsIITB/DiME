@@ -2,6 +2,9 @@
 #define __DA_MEM_LIB_H__
 
 #include "../common/da_debug.h"
+
+int init_mem_lib (void);
+int cleanup_mm_lib (void);
 /*  get_ptep
  *
  *  Description:
@@ -20,8 +23,11 @@ void ml_protect_all_pages(struct mm_struct * mm);
 
 int ml_unprotect_page(struct mm_struct *mm, ulong address);
 int ml_protect_page(struct mm_struct *mm, ulong address);
+int ml_clear_accessed(struct mm_struct *mm, ulong address);
 int ml_is_protected(struct mm_struct *mm, ulong address);
 int ml_is_present(struct mm_struct *mm, ulong address);
+int ml_is_dirty(struct mm_struct *mm, ulong address);
+int ml_is_accessed(struct mm_struct *mm, ulong address);
 
 int ml_is_inlist(struct mm_struct *mm, ulong address);
 int ml_set_inlist(struct mm_struct *mm, ulong address);
