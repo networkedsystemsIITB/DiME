@@ -34,9 +34,9 @@ MODULE_DESCRIPTION("Dime FIFO page replacement policy");
 
 static struct prp_fifo_struct *to_prp_fifo_struct(struct page_replacement_policy_struct *prp) {
 	struct prp_fifo_struct *ret = NULL;
-	DA_ENTRY();
+	//DA_ENTRY();
 	ret = container_of(prp, struct prp_fifo_struct, prp);
-	DA_EXIT();
+	//DA_EXIT();
 	return ret;
 }
 
@@ -95,6 +95,7 @@ int lpl_AddPage(struct dime_instance_struct *dime_instance, struct mm_struct * m
 	struct prp_fifo_struct *prp_fifo = to_prp_fifo_struct(dime_instance->prp);
 	//struct list_head *lnode = NULL;
 
+	// if local page size is changed dynamically, delete extra nodes from the list
 	while (dime_instance->local_npages < prp_fifo->lpl_count) {
 		struct list_head *first_node;
 		write_lock(&prp_fifo->lock);

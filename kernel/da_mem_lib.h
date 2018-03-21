@@ -11,6 +11,7 @@ int cleanup_mm_lib (void);
  *      Returns pointer to PTE corresponding to given virtual address
  */
 pte_t * ml_get_ptep(struct mm_struct *mm, unsigned long virt);
+struct page *ml_get_page_sruct(struct mm_struct *mm, unsigned long virt);
 
 /*  protect_pages
  *

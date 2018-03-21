@@ -51,12 +51,12 @@ int cleanup_mm_lib (void) {
 // Function pointer to flush_tlb_page function. Since it is not exported symbol,
 // it has to be extracted using kallsyms_lookup_name function.
 void flush_tlb_page(struct vm_area_struct * vma, unsigned long a) {
-	DA_ENTRY();
+	//DA_ENTRY();
 	if(flush_tlb_mm_range_fp)
 		flush_tlb_mm_range_fp(vma->vm_mm, a, a + PAGE_SIZE, VM_NONE);
 	else
 		DA_WARNING("flush_tlb_mm_range_fp is NULL, not flushing :%p", flush_tlb_mm_range_fp);
-	DA_EXIT();
+	//DA_EXIT();
 }
 
 /*  get_ptep
@@ -70,7 +70,7 @@ pte_t * ml_get_ptep(struct mm_struct *mm, unsigned long virt) {
 	pmd_t *pmd;
 	pte_t *pte;
 	pgd_t *pgd;
-	DA_ENTRY();
+	//DA_ENTRY();
 
 	if(mm==NULL){
 		DA_ERROR("mm is null");
@@ -112,7 +112,7 @@ pte_t * ml_get_ptep(struct mm_struct *mm, unsigned long virt) {
 	}
 
 EXIT:
-	DA_EXIT();
+	//DA_EXIT();
 	return pte;
 }
 
@@ -124,6 +124,7 @@ struct page *ml_get_page_sruct(struct mm_struct *mm, unsigned long virt) {
 	}
 	return page;
 }
+EXPORT_SYMBOL(ml_get_page_sruct);
 
 
 
@@ -141,7 +142,7 @@ void ml_protect_all_pages(struct mm_struct * mm) {
 
 		for (vma=mm->mmap ; vma ; vma=vma->vm_next) {
 			for (vpage = vma->vm_start; vpage < vma->vm_end; vpage += PAGE_SIZE) {
-				DA_DEBUG("protecting page %lu", vpage);
+				//DA_DEBUG("protecting page %lu", vpage);
 				// ml_set_inlist(mm, vpage);
 				ml_protect_page(mm, vpage);
 			}
