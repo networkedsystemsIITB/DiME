@@ -28,7 +28,8 @@ unsigned int da_debug_flag =    DA_DEBUG_ALERT_FLAG
                                 | DA_DEBUG_INFO_FLAG
                                 | DA_DEBUG_WARNING_FLAG
                                 | DA_DEBUG_ERROR_FLAG
-                                //| DA_DEBUG_ENTRYEXIT_FLAG
+                                | DA_DEBUG_ENTRYEXIT_FLAG
+                                //| DA_DEBUG_DEBUG_FLAG
                                 ;
 EXPORT_SYMBOL(da_debug_flag);
 
@@ -209,28 +210,8 @@ int do_page_fault_hook_start_new (struct pt_regs *regs,
                             unsigned long address,
                             int * hook_flag,
                             ulong * hook_timestamp) {
-    struct dime_instance_struct *dime_instance;
     *hook_flag = 0;
-    
-    if(address != 0ul && (dime_instance = pt_get_dime_instance_of_pid(&dime, current->tgid)) != NULL) {
-        // Start timer now, to calculate page fetch delay later
-        *hook_timestamp = sched_clock();
-
-        if (!ml_is_present(current->mm, address)) { // TODO :: pages are not seen as protected, so add all the pages to list, problem is there might be duplecate entries in the local page list
-            /*pte_t* ptep = ml_get_ptep(current->mm, address);
-            if (ptep)
-                DA_WARNING("duplecate entry :: flags : prot:%-4lu present:%-4lu inlist:%-4lu %lu",
-                                                    pte_flags(*ptep) & _PAGE_PROTNONE,
-                                                    pte_flags(*ptep) & _PAGE_PRESENT,
-                                                    pte_flags(*ptep) & _PAGE_SOFTW2,
-                                                    address);
-            else
-                DA_WARNING("duplecate entry :: ptep entry is null");*/
-
-            if(dime_instance->prp && dime_instance->prp->add_page(dime_instance, current->mm, address) == 1)
-                *hook_flag = 1;                     // Set flag to execute delay in end hook
-        }
-    }
+    *hook_timestamp = sched_clock();
 
     return 0;
 }
@@ -246,15 +227,13 @@ int do_page_fault_hook_end_new (struct pt_regs *regs,
                             int * hook_flag,
                             ulong * hook_timestamp) {
     ulong delay_ns;
-    //int count=0;
+    struct dime_instance_struct *dime_instance = pt_get_dime_instance_of_pid(&dime, current->tgid);
 
-    // Check if hook_flag was set in start hook
-    if(*hook_flag != 0) {
-        struct dime_instance_struct *dime_instance = pt_get_dime_instance_of_pid(&dime, current->tgid);
-        if(dime_instance) {
-            // Inject delays here
-            // ml_set_inlist(current->mm, address);
-            // ml_unprotect_page(current->mm, address);     // no page fault for pages in list // might be reason for crash, bad swap entry
+    if(address != 0ul && dime_instance) {
+        // Inject delays here
+
+        if(dime_instance->prp && dime_instance->prp->add_page && dime_instance->prp->add_page(dime_instance, current->mm, address) == 1) {
+
             dime_instance->page_fault_count++;
 
             delay_ns = 0;
