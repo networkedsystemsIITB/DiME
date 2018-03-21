@@ -6,7 +6,8 @@
 struct prp_lru_struct {
 	struct page_replacement_policy_struct prp;
 
-	struct list_head lpl_head;
+	struct list_head lpl_pagecache_head;
+	struct list_head lpl_anon_head;
 	ulong lpl_count;
 	rwlock_t lock;
 };
