@@ -4,6 +4,8 @@
 #include <linux/mm.h>
 #include "../common/da_debug.h"
 
+#define MAX_DIME_INSTANCES 50
+
 struct dime_instance_struct;
 
 struct page_replacement_policy_struct {
@@ -24,7 +26,7 @@ struct dime_instance_struct {
 };
 
 struct dime_struct {
-	struct dime_instance_struct dime_instances[50];
+	struct dime_instance_struct dime_instances[MAX_DIME_INSTANCES];
 	int dime_instances_size;
 };
 
