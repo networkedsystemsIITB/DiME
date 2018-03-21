@@ -223,13 +223,14 @@ static ssize_t procfile_write(struct file *file, const char *buffer, size_t leng
         return -EINVAL;
     } else if (dime.dime_instances_size == update_instance_id) {
         // create new instance 
-        dime.dime_instances_size = update_instance_id+1;
-        dime.dime_instances[update_instance_id].instance_id         = update_instance_id;
-        dime.dime_instances[update_instance_id].latency_ns          = 10000ULL;
-        dime.dime_instances[update_instance_id].bandwidth_bps       = 10000000000ULL;
-        dime.dime_instances[update_instance_id].local_npages        = 20ULL;
-        dime.dime_instances[update_instance_id].page_fault_count    = 0ULL;
-        dime.dime_instances[update_instance_id].pid_count           = 0;
+        dime.dime_instances[update_instance_id+1].instance_id           = update_instance_id;
+        dime.dime_instances[update_instance_id+1].latency_ns            = 10000ULL;
+        dime.dime_instances[update_instance_id+1].bandwidth_bps         = 10000000000ULL;
+        dime.dime_instances[update_instance_id+1].local_npages          = 20ULL;
+        dime.dime_instances[update_instance_id+1].page_fault_count      = 0ULL;
+        dime.dime_instances[update_instance_id+1].pid_count             = 0;
+        dime.dime_instances[update_instance_id+1].prp                   = NULL;
+        dime.dime_instances_size                                        = update_instance_id+1;
     }
 
     if(update_pid_count != -1) {
