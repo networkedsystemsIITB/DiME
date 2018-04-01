@@ -13,6 +13,7 @@
 #include <linux/list.h>
 #include <linux/slab.h>
 #include <asm/pgtable_types.h>
+#include <linux/kthread.h>
 
 #include "da_mem_lib.h"
 
@@ -37,23 +38,38 @@ static struct prp_lru_struct *to_prp_lru_struct(struct page_replacement_policy_s
 	return container_of(prp, struct prp_lru_struct, prp);
 }
 
+void DA_LRU_STAT(struct prp_lru_struct *prp_lru) {
+	DA_INFO("in_pc: %d \ta_pc: %d \tin_an: %d \ta_an: %d \tcount: %lu",  prp_lru->inactive_pc.size,
+															prp_lru->active_pc.size,
+															prp_lru->inactive_an.size,
+															prp_lru->active_an.size,
+															prp_lru->lpl_count);
+}
+
 int lpl_AddPage(struct dime_instance_struct *dime_instance, struct mm_struct * mm, ulong address) {
 	struct lpl_node_struct *node = NULL;
 	int ret_execute_delay = 0;
 	struct prp_lru_struct *prp_lru = to_prp_lru_struct(dime_instance->prp);
 	struct page *page = NULL;
 
-
+	DA_INFO("pagefault for %lu", address);
 	// pages in local memory more than the configured dime instance quota, evict extra pages
 	// possible when instance configuration is changed dynamically using proc file /proc/dime_config
 	if(dime_instance->local_npages < prp_lru->lpl_count) {
+		// TODO:: not required till dynamic changes, need to apply locks
 		write_lock(&prp_lru->lock);
 		while (dime_instance->local_npages < prp_lru->lpl_count) {
-			struct list_head *first_node;
-			if(!list_empty(prp_lru->lpl_pagecache_head.next))
-				first_node = prp_lru->lpl_pagecache_head.next;
+			struct list_head *first_node = NULL;
+			if(!list_empty(prp_lru->inactive_pc.head.next))
+				first_node = prp_lru->inactive_pc.head.next;
+			else if(!list_empty(prp_lru->inactive_an.head.next))
+				first_node = prp_lru->inactive_an.head.next;
+			else if(!list_empty(prp_lru->active_pc.head.next))
+				first_node = prp_lru->active_pc.head.next;
+			else if(!list_empty(prp_lru->active_an.head.next))
+				first_node = prp_lru->active_an.head.next;
 			else
-				first_node = prp_lru->lpl_anon_head.next;
+				DA_ERROR("all lists are empty, unable to select node");
 			list_del_rcu(first_node);
 			prp_lru->lpl_count--;
 
@@ -87,196 +103,453 @@ int lpl_AddPage(struct dime_instance_struct *dime_instance, struct mm_struct * m
 		}
 	} else {
 		struct list_head 	*iternode 					= NULL,
-							*node_pc_naccessed 			= NULL,	// first not accessed page in pagecache local page list
-							*node_pc_ndirty 			= NULL,	// first non dirty page in pagecache local page list
-							*node_an_naccessed 			= NULL,	// first not accessed page in anonymous local page list
-							*node_an_ndirty 			= NULL,	// first non dirty page in anonymous local page list
-							*node_to_evict 				= NULL,
-							*node_to_evict_list_head 	= NULL;
+							*node_to_evict 				= NULL;
+		//int old_accessed;
+		int old_dirty;
+		struct mm_struct * old_mm;
 
-		write_lock(&prp_lru->lock);
+retry_node_search:
 
-		node_to_evict_list_head = &(prp_lru->lpl_pagecache_head);
-
-RETRY_WITH_NEXT_LIST:
-		if(node_to_evict_list_head == &(prp_lru->lpl_pagecache_head)) {
-			//DA_ERROR("first scan in pagecache");
-		} else if (node_to_evict_list_head == &(prp_lru->lpl_anon_head)) {
-			//DA_ERROR("second scan in anonymous");
-		}
-		for(iternode = node_to_evict_list_head->next ; iternode != node_to_evict_list_head ; iternode = iternode->next) {
-			struct mm_struct *mm;
-			int accessed, dirty;
-
-			node = list_entry(iternode, struct lpl_node_struct, list_node);
-			if(current->pid == node->pid && address == node->address)
-				// if faulting page is same as the one we want to evict, continue,
-				// since it is going to get protected and will recursively called
-				continue;
-
-			mm = ml_get_mm_struct(node->pid);
-			accessed = ml_is_accessed(mm, node->address);
-			dirty = ml_is_dirty(mm, node->address);
-
-
-			if(node_to_evict_list_head == &(prp_lru->lpl_pagecache_head)) {
-				if(!node_pc_naccessed && !accessed) {
-					node_pc_naccessed = iternode;
-					break;
-				}
-
-				if(!node_pc_ndirty && !dirty) {
-					node_pc_ndirty = iternode;
-				}
-
-			} else if(node_to_evict_list_head == &(prp_lru->lpl_anon_head)) {
-				if(!node_an_naccessed && !accessed) {
-					node_an_naccessed = iternode;
-					break;
-				}
-
-				if(!node_an_ndirty && !dirty) {
-					node_an_ndirty = iternode;
-				}
-
-			}
-
-			ml_clear_accessed(mm, node->address);
-		}
-
-		if (node_to_evict_list_head == &(prp_lru->lpl_pagecache_head))
-		{
-			if (node_pc_naccessed) 
-			{
-				//DA_ERROR("found a page for replacement: pagecache non-accessed addr:%lu", node->address);
-				node_to_evict = node_pc_naccessed;
-				node_to_evict_list_head = &(prp_lru->lpl_pagecache_head);
-			}
-			else
-			{
-				//DA_ERROR("non-accessed page not found in pagecache, retrying with anonymous pages: %lu", address);
-				node_to_evict_list_head = &(prp_lru->lpl_anon_head);
-				goto RETRY_WITH_NEXT_LIST;
-			} 
-		}
-		else if (node_to_evict_list_head == &(prp_lru->lpl_anon_head))
-		{
-			if (node_an_naccessed)
-			{
-				//DA_ERROR("found a page for replacement: anonymous non-accessed addr:%lu", node->address);	
-				node_to_evict = node_an_naccessed;
-				node_to_evict_list_head = &(prp_lru->lpl_anon_head);
-			} 
-			else if (node_pc_ndirty) 
-			{
-				//DA_ERROR("found a page for replacement: pagecache non-dirty addr:%lu", node->address);
-				node_to_evict = node_pc_ndirty;
-				node_to_evict_list_head = &(prp_lru->lpl_pagecache_head);
-			} 
-			else if (node_an_ndirty) 
-			{
-				//DA_ERROR("found a page for replacement: anonymous non-dirty addr:%lu", node->address);
-				node_to_evict = node_an_ndirty;
-				node_to_evict_list_head = &(prp_lru->lpl_anon_head);
-			}
-			else if(prp_lru->lpl_pagecache_head.next != &(prp_lru->lpl_pagecache_head)) 
-			{
-				//DA_ERROR("not found a page for replacement, taking last page of pagecache addr:%lu", node->address);
-				node_to_evict = prp_lru->lpl_pagecache_head.next;
-				node_to_evict_list_head = &(prp_lru->lpl_pagecache_head);
-			} 
-			else if(prp_lru->lpl_anon_head.next != &(prp_lru->lpl_anon_head)) 
-			{
-				//DA_ERROR("not found a page for replacement, taking last page of anonymous addr:%lu", node->address);
-				node_to_evict = prp_lru->lpl_anon_head.next;
-				node_to_evict_list_head = &(prp_lru->lpl_anon_head);
-			} 
-			else 
-			{
-				//DA_ERROR("not found a page for replacement, lists are empty addr:%lu", node->address);
-				node_to_evict = NULL;
-				node_to_evict_list_head = NULL;
-			}
-		}
-
-
-		if(node_to_evict != NULL) {
-			list_del_rcu(node_to_evict_list_head);
-			list_add_rcu(node_to_evict_list_head, node_to_evict);
+		// search in free list
+		write_lock(&prp_lru->free.lock);
+		if(! list_empty(&prp_lru->free.head)) {
+			node_to_evict = prp_lru->free.head.next;
 			list_del_rcu(node_to_evict);
+			prp_lru->free.size--;
+		}
+		write_unlock(&prp_lru->free.lock);
+
+		if(!node_to_evict) {
+			// search from pagecache inactive list
+			// TODO:: decide based on some criterion whether to evict pages from this list
+			struct list_head temp_list = LIST_HEAD_INIT(temp_list);
+
+			write_lock(&prp_lru->inactive_pc.lock);
+			for(iternode = prp_lru->inactive_pc.head.next ; iternode != &prp_lru->inactive_pc.head ; iternode = iternode->next) {
+				struct mm_struct *mm;
+				int accessed, dirty;
+
+				node = list_entry(iternode, struct lpl_node_struct, list_node);
+				if(current->pid == node->pid && address == node->address)
+					// if faulting page is same as the one we want to evict, continue,
+					// since it is going to get protected and will recursively called
+					continue;
+
+				mm = ml_get_mm_struct(node->pid);
+				accessed = ml_is_accessed(mm, node->address);
+				dirty = ml_is_dirty(mm, node->address);
+
+				if(accessed) {
+					iternode = iternode->prev;
+					list_del_rcu(&(node->list_node));
+					prp_lru->inactive_pc.size--;
+					ml_clear_accessed(mm, node->address);
+					list_add_tail_rcu(&(node->list_node), &temp_list);
+				} else {
+					list_del_rcu(&(node->list_node));
+					prp_lru->inactive_pc.size--;
+					node_to_evict = &(node->list_node);
+					DA_INFO("found a page from inactive pc, %lu, %d", node->address, prp_lru->inactive_pc.size);
+					DA_LRU_STAT(prp_lru);
+					break;
+				}
+
+			}
+			write_unlock(&prp_lru->inactive_pc.lock);
+
+
+			write_lock(&prp_lru->active_pc.lock);
+			while(!list_empty(&temp_list)) {
+				struct list_head *h = temp_list.next;
+				list_del_rcu(h);
+				list_add_tail_rcu(h, &prp_lru->active_pc.head);
+				prp_lru->active_pc.size++;
+			}
+			write_unlock(&prp_lru->active_pc.lock);
 		}
 
-		write_unlock(&prp_lru->lock);
+		if(!node_to_evict) {
+			// search from anon inactive list
+			// TODO:: decide based on some criterion whether to evict pages from this list
+			struct list_head temp_list = LIST_HEAD_INIT(temp_list);
 
-		if(node_to_evict == NULL) {
-			DA_ERROR("no node to evict, error in local page list");
-			return ret_execute_delay = 0;
+			write_lock(&prp_lru->inactive_an.lock);
+			for(iternode = prp_lru->inactive_an.head.next ; iternode != &prp_lru->inactive_an.head ; iternode = iternode->next) {
+				struct mm_struct *mm;
+				int accessed, dirty;
+
+				node = list_entry(iternode, struct lpl_node_struct, list_node);
+				if(current->pid == node->pid && address == node->address)
+					// if faulting page is same as the one we want to evict, continue,
+					// since it is going to get protected and will recursively called
+					continue;
+
+				mm = ml_get_mm_struct(node->pid);
+				accessed = ml_is_accessed(mm, node->address);
+				dirty = ml_is_dirty(mm, node->address);
+
+				if(accessed) {
+					iternode = iternode->prev;
+					list_del_rcu(&(node->list_node));
+					prp_lru->inactive_an.size--;
+					ml_clear_accessed(mm, node->address);
+					list_add_tail_rcu(&(node->list_node), &temp_list);
+				} else {
+					list_del_rcu(&(node->list_node));
+					prp_lru->inactive_an.size--;
+					node_to_evict = &(node->list_node);
+					DA_INFO("found a page from inactive an, %lu, %d", node->address, prp_lru->inactive_an.size);
+					DA_LRU_STAT(prp_lru);
+					break;
+				}
+
+			}
+			write_unlock(&prp_lru->inactive_an.lock);
+
+
+			write_lock(&prp_lru->active_an.lock);
+			while(!list_empty(&temp_list)) {
+				struct list_head *h = temp_list.next;
+				list_del_rcu(h);
+				list_add_tail_rcu(h, &prp_lru->active_an.head);
+				prp_lru->active_an.size++;
+			}
+			write_unlock(&prp_lru->active_an.lock);
 		}
 
-		// protect FIFO last address, so that it will be faulted in future
+		if(!node_to_evict) {
+			// search from pagecache active list
+			// TODO:: decide based on some criterion whether to evict pages from this list
+			write_lock(&prp_lru->active_pc.lock);
+			for(iternode = prp_lru->active_pc.head.next ; iternode != &prp_lru->active_pc.head ; iternode = iternode->next) {
+				struct mm_struct *mm;
+				int accessed, dirty;
+
+				node = list_entry(iternode, struct lpl_node_struct, list_node);
+				if(current->pid == node->pid && address == node->address)
+					// if faulting page is same as the one we want to evict, continue,
+					// since it is going to get protected and will recursively called
+					continue;
+
+				mm = ml_get_mm_struct(node->pid);
+				accessed = ml_is_accessed(mm, node->address);
+				dirty = ml_is_dirty(mm, node->address);
+
+				if(accessed) {// || dirty) {
+					iternode = iternode->prev;
+					list_del_rcu(&(node->list_node));
+					ml_clear_accessed(mm, node->address);
+					//ml_clear_dirty(mm, node->address);		// TODO:: create new list of dirty pages, kswapd will flush these pages
+					list_add_tail_rcu(&(node->list_node), &prp_lru->active_pc.head);
+					//DA_INFO("not selecting this page since accessed or dirty active pc, %lu, %d", node->address, prp_lru->active_pc.size);
+				} else {
+					list_del_rcu(&(node->list_node));
+					prp_lru->active_pc.size--;
+					node_to_evict = &(node->list_node);
+					DA_INFO("found a page from active pc, %lu, %d", node->address, prp_lru->active_pc.size);
+					DA_LRU_STAT(prp_lru);
+					break;
+				}
+			}
+			write_unlock(&prp_lru->active_pc.lock);
+		}
+
+		if(!node_to_evict) {
+			// search from anon active list
+			// TODO:: decide based on some criterion whether to evict pages from this list
+			write_lock(&prp_lru->active_an.lock);
+			for(iternode = prp_lru->active_an.head.next ; iternode != &prp_lru->active_an.head ; iternode = iternode->next) {
+				struct mm_struct *mm;
+				int accessed, dirty;
+
+				node = list_entry(iternode, struct lpl_node_struct, list_node);
+				if(current->pid == node->pid && address == node->address)
+					// if faulting page is same as the one we want to evict, continue,
+					// since it is going to get protected and will recursively called
+					continue;
+
+				mm = ml_get_mm_struct(node->pid);
+				accessed = ml_is_accessed(mm, node->address);
+				dirty = ml_is_dirty(mm, node->address);
+
+				if(accessed) {// || dirty) {
+					iternode = iternode->prev;
+					list_del_rcu(&(node->list_node));
+					ml_clear_accessed(mm, node->address);
+					//ml_clear_dirty(mm, node->address);		// TODO:: create new list of dirty pages, kswapd will flush these pages
+					list_add_tail_rcu(&(node->list_node), &prp_lru->active_an.head);
+				} else {
+					list_del_rcu(&(node->list_node));
+					prp_lru->active_an.size--;
+					node_to_evict = &(node->list_node);
+					DA_INFO("found a page from active an, %lu, %d", node->address, prp_lru->active_an.size);
+					DA_LRU_STAT(prp_lru);
+					break;
+				}
+
+			}
+			write_unlock(&prp_lru->active_an.lock);
+		}
+
+		if(!node_to_evict) {
+			// forcefully select any page
+			write_lock(&prp_lru->inactive_pc.lock);
+			if(!list_empty(&prp_lru->inactive_pc.head)) {
+				node_to_evict = prp_lru->inactive_pc.head.next;
+				list_del_rcu(node_to_evict);
+					prp_lru->inactive_pc.size--;
+				DA_WARNING("could not find a page to evict, selecting first page from inactive pagecache");
+					DA_LRU_STAT(prp_lru);
+			}
+			write_unlock(&prp_lru->inactive_pc.lock);
+
+			if(!node_to_evict) {
+				write_lock(&prp_lru->inactive_an.lock);
+				if(!list_empty(&prp_lru->inactive_an.head)) {
+					node_to_evict = prp_lru->inactive_an.head.next;
+					list_del_rcu(node_to_evict);
+					prp_lru->inactive_an.size--;
+					DA_WARNING("could not find a page to evict, selecting first page from inactive anon");
+					DA_LRU_STAT(prp_lru);
+				}
+				write_unlock(&prp_lru->inactive_an.lock);
+			}
+
+			if(!node_to_evict) {
+				write_lock(&prp_lru->active_pc.lock);
+				if(!list_empty(&prp_lru->active_pc.head)) {
+					node_to_evict = prp_lru->active_pc.head.next;
+					list_del_rcu(node_to_evict);
+					prp_lru->active_pc.size--;
+					DA_WARNING("could not find a page to evict, selecting first page from active pagecache");
+					DA_LRU_STAT(prp_lru);
+				}
+				write_unlock(&prp_lru->active_pc.lock);
+
+			}
+
+			if(!node_to_evict) {
+				write_lock(&prp_lru->active_an.lock);
+				if(!list_empty(&prp_lru->active_an.head)) {
+					node_to_evict = prp_lru->active_an.head.next;
+					list_del_rcu(node_to_evict);
+					prp_lru->active_an.size--;
+					DA_WARNING("could not find a page to evict, selecting first page from active anon");
+					DA_LRU_STAT(prp_lru);
+				}
+				write_unlock(&prp_lru->active_an.lock);
+			}
+
+			if(!node_to_evict)
+				goto retry_node_search;
+		}
+
+		// protect page, so that it will get faulted in future
 		node = list_entry(node_to_evict, struct lpl_node_struct, list_node);
 		if(node->pid <= 0) {
 			DA_ERROR("invalid pid: %d : address:%lu", node->pid, node->address);
 			return ret_execute_delay = 0;
 		}
+
+		old_mm = ml_get_mm_struct(node->pid);
+		old_dirty = ml_is_dirty(old_mm, node->address);
+		if(old_dirty) {
+			ret_execute_delay = 1;
+			ml_clear_dirty(old_mm, node->address);
+			// TODO:: instead insert address to flush dirty pages list
+		} else {
+			ret_execute_delay = 0;
+		}
+
 		ml_protect_page(ml_get_mm_struct(node->pid), node->address);
-		// Since local pages are occupied, delay should be injected
-		ret_execute_delay = 1;
 	}
+
 
 	node->address = address;
 	node->pid = current->pid;
-
-
-	write_lock(&prp_lru->lock);
 	
 	page = ml_get_page_sruct(mm, address);
+	
+	// Sometimes bulk pagefault requests come and evicting any page from these requests will again trigger pagefault.
+	// This happens recursively if accessed bit is not set for each requested page.
+	// So, set accessed bit to all requested pages
+	ml_set_accessed(mm, address);
 
 	if( ((unsigned long)(page->mapping) & (unsigned long)0x01) != 0 ) {
-		list_add_tail_rcu(&(node->list_node), &prp_lru->lpl_anon_head);
+		write_lock(&prp_lru->active_an.lock);
+		list_add_tail_rcu(&(node->list_node), &prp_lru->active_an.head);
+		prp_lru->active_an.size++;
+		write_unlock(&prp_lru->active_an.lock);
 		//DA_DEBUG("this is anonymous page: %lu, pid: %d", address, node->pid);
 	} else {
-		list_add_tail_rcu(&(node->list_node), &prp_lru->lpl_pagecache_head);
+		write_lock(&prp_lru->active_pc.lock);
+		list_add_tail_rcu(&(node->list_node), &prp_lru->active_pc.head);
+		prp_lru->active_pc.size++;
+		write_unlock(&prp_lru->active_pc.lock);
 		//DA_DEBUG("this is pagecache page: %lu, pid: %d", address, node->pid);
 	}
-	write_unlock(&prp_lru->lock);
 	if(current->pid <= 0)
 		DA_ERROR("invalid pid: %d : address: %lu", current->pid, address);
 
 	return ret_execute_delay;
 }
+/*
+LRU pages belong to one of two linked list, the "active" and the "inactive" list. 
+Page movement is driven by memory pressure. Pages are taken from the end of the inactive list to be freed. 
+If the page has the reference bit set, it is moved to the beginning of the active list and the reference bit is cleared. 
+If the page is dirty, writeback is commenced and the page is moved to the beginning of the inactive list. 
+If the page is unreferenced and clean, it can be reused.
 
-void lpl_Init(struct dime_instance_struct *dime_instance) {
-	//struct prp_lru_struct *prp_lru = NULL;
+The kswapd thread in woken up by the physical page allocator only when the number of available free pages is less than pages_low.
+zone->pages_low = (zone->pages_min * 5) / 4;   // in file mm/page_alloc.c
 
-	DA_ENTRY();
+pagecache list size: As long as the working set is smaller than half of the file cache, it is completely protected from the page eviction code.
+size of anonymous inactive list = Maybe 30% of anonymous pages on a 1GB system, but 1% of anonymous pages on a 1TB system?
+*/
 
-	/*prp_lru = to_prp_lru_struct(dime_instance->prp);
-	rwlock_init(&(prp_lru->lock));
-	prp_lru->lpl_anon_head = (struct list_head) { &(prp_lru->lpl_anon_head), &(prp_lru->lpl_anon_head) };
-	prp_lru->lpl_pagecache_head = (struct list_head) { &(prp_lru->lpl_pagecache_head), &(prp_lru->lpl_pagecache_head) };
-	*prp_lru = (struct prp_lru_struct) {
-		.prp = {
-			.add_page 	= lpl_AddPage,
-			.clean 		= lpl_CleanList,
-		},
-		.lpl_count = 0,
-	};*/
+#define MIN_FREE_PAGES 10	// percentage of local memory available in free list
 
-	DA_EXIT();
+int balance_lists(struct lpl *active_list, struct lpl *inactive_list, int target, struct lpl *free) {
+	struct list_head 	*iternode 					= NULL,
+						*iternode_free 				= NULL;
+	struct lpl_node_struct *node = NULL;
+	struct list_head local_free_list = LIST_HEAD_INIT(local_free_list);
+	struct list_head local_inactive_list = LIST_HEAD_INIT(local_inactive_list);
+
+
+	write_lock(&active_list->lock);
+	for(iternode = active_list->head.next ; iternode != &active_list->head && target > 0; iternode = iternode->next) {
+		struct mm_struct *mm;
+		int accessed, dirty;
+
+		node = list_entry(iternode, struct lpl_node_struct, list_node);
+		mm = ml_get_mm_struct(node->pid);
+		if(!mm) {
+			iternode = iternode->prev;
+			list_del_rcu(&node->list_node);
+			active_list->size--;
+			list_add_tail_rcu(&node->list_node, &local_free_list);
+			target--;
+			continue;
+		}
+		accessed = ml_is_accessed(mm, node->address);
+		dirty = ml_is_dirty(mm, node->address);
+
+		/*if(dirty) {
+			// emulate page flush, inject delay
+			ulong delay_ns = 0, start_time = sched_clock();
+			delay_ns = ((PAGE_SIZE * 8ULL) * 1000000000ULL) / dime_instance->bandwidth_bps;  // Transmission delay
+			delay_ns += 2*dime_instance->latency_ns;                                         // Two way latency
+			while ((sched_clock() - start_time) < delay_ns) {
+			    // Wait for delay
+			}
+			ml_clear_dirty(mm, node->address);
+		}*/
+		if(!accessed) {
+			//list_del_rcu(node_to_evict_list_head);
+			//list_add_rcu(node_to_evict_list_head, node_to_evict);
+			iternode_free = iternode;
+			iternode = iternode->prev;
+			list_del_rcu(iternode_free);
+			active_list->size--;
+			target--;
+			ml_clear_accessed(mm, node->address);
+			list_add_tail_rcu(iternode_free, &local_inactive_list);
+		}
+	}
+	write_unlock(&active_list->lock);
+	// TODO::update head pointer
+
+	write_lock(&free->lock);
+	while(!list_empty(&local_free_list)) {
+		struct list_head *h = local_free_list.next;
+		list_del_rcu(h);
+		list_add_tail_rcu(h, &free->head);
+		free->size++;
+	}
+	write_unlock(&free->lock);
+
+
+	write_lock(&inactive_list->lock);
+	while(!list_empty(&local_inactive_list)) {
+		struct list_head *h = local_inactive_list.next;
+		list_del_rcu(h);
+		list_add_tail_rcu(h, &inactive_list->head);
+		inactive_list->size++;
+	}
+	write_unlock(&inactive_list->lock);
+
+	return 0;
 }
 
 
-void __lpl_CleanList (struct prp_lru_struct *prp_lru) {
+// move inactive page from active list
+int balance_local_page_lists(void) {
+	int i = 0;
+	struct prp_lru_struct *prp_lru = NULL;
+	struct dime_instance_struct *dime_instance;
+
+	for(i=0 ; i<dime.dime_instances_size ; ++i) {
+		dime_instance = &(dime.dime_instances[i]);
+		prp_lru = to_prp_lru_struct(dime_instance->prp);
+		if(prp_lru->lpl_count < dime_instance->local_npages)
+			//|| prp_lru->free.size >= (MIN_FREE_PAGES * dime_instance->local_npages)/100)
+			// no need to evict pages for this dime instance
+			continue;
+
+		if(prp_lru->free.size < (MIN_FREE_PAGES * dime_instance->local_npages)/100) {
+			int anon_size = prp_lru->active_an.size + prp_lru->inactive_an.size;
+			int pagecache_size = prp_lru->active_pc.size + prp_lru->inactive_pc.size;
+
+			if(pagecache_size > (45 * dime_instance->local_npages)/100) {
+				int target_pi = prp_lru->inactive_pc.size - (18 * dime_instance->local_npages)/100;
+				int target_pa = prp_lru->active_pc.size   - (27 * dime_instance->local_npages)/100;
+				target_pi = target_pi < 0 ? 0 : target_pi;
+				target_pa = target_pa < 0 ? 0 : target_pa;
+			}
+		}
+
+		if(prp_lru->inactive_pc.size < (prp_lru->active_pc.size+prp_lru->inactive_pc.size)*40/100) {
+			// need to move passive pages from active pagecache list to inactive list
+			int target = (prp_lru->active_pc.size+prp_lru->inactive_pc.size)*40/100 - prp_lru->inactive_pc.size;
+			if(target>0)
+				balance_lists(&prp_lru->active_pc, &prp_lru->inactive_pc, target, &prp_lru->free);
+		}
+
+		if(prp_lru->inactive_an.size < (prp_lru->active_an.size+prp_lru->inactive_an.size)*40/100) {
+			// need to move passive pages from active pagecache list to inactive list
+			int target = (prp_lru->active_an.size+prp_lru->inactive_an.size)*40/100 - prp_lru->inactive_an.size;
+			if(target>0)
+				balance_lists(&prp_lru->active_an, &prp_lru->inactive_an, target, &prp_lru->free);
+		}
+	}
+
+	return 0;
+}
+
+
+static struct task_struct *dime_kswapd;
+static int dime_kswapd_fn(void *unused) {
+	allow_signal(SIGKILL);
+	while (!kthread_should_stop()) {
+
+		msleep(10);
+		if (signal_pending(dime_kswapd))
+			break;
+		balance_local_page_lists();
+	}
+	DA_INFO("dime_kswapd thread STOPPING");
+	do_exit(0);
+	return 0;
+}
+
+
+
+void __lpl_CleanList (struct list_head *prp) {
 	DA_ENTRY();
 
-	while (!list_empty(&prp_lru->lpl_pagecache_head)) {
-		struct lpl_node_struct *node = list_first_entry(&prp_lru->lpl_pagecache_head, struct lpl_node_struct, list_node);
-		list_del_rcu(&node->list_node);
-		kfree(node);
-	}
-	while (!list_empty(&prp_lru->lpl_anon_head)) {
-		struct lpl_node_struct *node = list_first_entry(&prp_lru->lpl_anon_head, struct lpl_node_struct, list_node);
+	while (!list_empty(prp)) {
+		struct lpl_node_struct *node = list_first_entry(prp, struct lpl_node_struct, list_node);
 		list_del_rcu(&node->list_node);
 		kfree(node);
 	}
@@ -286,7 +559,11 @@ void __lpl_CleanList (struct prp_lru_struct *prp_lru) {
 
 void lpl_CleanList (struct dime_instance_struct *dime_instance) {
 	struct prp_lru_struct *prp_lru = to_prp_lru_struct(dime_instance->prp);
-	__lpl_CleanList(prp_lru);
+	__lpl_CleanList(&prp_lru->free.head);
+	__lpl_CleanList(&prp_lru->active_an.head);
+	__lpl_CleanList(&prp_lru->inactive_an.head);
+	__lpl_CleanList(&prp_lru->active_pc.head);
+	__lpl_CleanList(&prp_lru->inactive_pc.head);
 }
 
 
@@ -294,6 +571,15 @@ int init_module(void) {
 	int ret = 0;
 	int i;
 	DA_ENTRY();
+
+	DA_INFO("creating dime_kswapd thread");
+	dime_kswapd = kthread_create(dime_kswapd_fn, NULL, "dime_kswapd");
+	if(dime_kswapd) {
+		DA_INFO("dime_kswapd thread created successfully");
+	} else {
+		DA_ERROR("dime_kswapd thread creation failed");
+		return -1;
+	}
 
 	for(i=0 ; i<dime.dime_instances_size ; ++i) {
 		struct prp_lru_struct *prp_lru = (struct prp_lru_struct*) kmalloc(sizeof(struct prp_lru_struct), GFP_KERNEL);
@@ -303,21 +589,37 @@ int init_module(void) {
 		}
 
 		rwlock_init(&(prp_lru->lock));
+		rwlock_init(&(prp_lru->free.lock));
+		rwlock_init(&(prp_lru->active_an.lock));
+		rwlock_init(&(prp_lru->inactive_an.lock));
+		rwlock_init(&(prp_lru->active_pc.lock));
+		rwlock_init(&(prp_lru->inactive_pc.lock));
 		write_lock(&prp_lru->lock);
-		prp_lru->lpl_anon_head = (struct list_head) { &(prp_lru->lpl_anon_head), &(prp_lru->lpl_anon_head) };
-		prp_lru->lpl_pagecache_head = (struct list_head) { &(prp_lru->lpl_pagecache_head), &(prp_lru->lpl_pagecache_head) };
+		INIT_LIST_HEAD(&prp_lru->free.head);
+		INIT_LIST_HEAD(&prp_lru->active_an.head);
+		INIT_LIST_HEAD(&prp_lru->active_pc.head);
+		INIT_LIST_HEAD(&prp_lru->inactive_an.head);
+		INIT_LIST_HEAD(&prp_lru->inactive_pc.head);
 		prp_lru->lpl_count = 0;
+		prp_lru->free.size = 0;
+		prp_lru->active_pc.size = 0;
+		prp_lru->active_an.size = 0;
+		prp_lru->inactive_pc.size = 0;
+		prp_lru->inactive_an.size = 0;
+
 		prp_lru->prp.add_page = lpl_AddPage;
 		prp_lru->prp.clean = lpl_CleanList;
 
 
 		// Set policy pointer at the end of initialization
 		dime.dime_instances[i].prp = &(prp_lru->prp);
-		lpl_Init(&dime.dime_instances[i]);
+		//lpl_Init(&dime.dime_instances[i]);
 		write_unlock(&prp_lru->lock);
 	}
 
 	ret = register_page_replacement_policy(NULL);
+	DA_INFO("waking up dime_kswapd thread");
+	wake_up_process(dime_kswapd);
 
 	DA_EXIT();
 	return ret;    // Non-zero return means that the module couldn't be loaded.
@@ -326,6 +628,10 @@ void cleanup_module(void) {
 	int i;
 	DA_ENTRY();
 
+	if(dime_kswapd) {
+		kthread_stop(dime_kswapd);
+		DA_INFO("dime_kswapd thread stopped");
+	}
 
 	for(i=0 ; i<dime.dime_instances_size ; ++i) {
 		lpl_CleanList(&dime.dime_instances[i]);
@@ -333,6 +639,7 @@ void cleanup_module(void) {
 	}
 
 	deregister_page_replacement_policy(NULL);
+
 
 	DA_INFO("cleaning up module complete");
 	DA_EXIT();
