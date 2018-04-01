@@ -4,6 +4,10 @@
 #include <linux/mm.h>
 #include "../common/da_debug.h"
 
+//#define write_lock(lock) while(0){}
+//#define write_unlock(lock) while(0){}
+
+
 #define MAX_DIME_INSTANCES 50
 
 struct dime_instance_struct;
@@ -35,6 +39,13 @@ struct lpl_node_struct {
 	
 	ulong address;
 	pid_t pid;
+};
+
+// local page list struct
+struct lpl {
+	struct list_head 	head;
+	int 				size;
+	rwlock_t 			lock;
 };
 
 
