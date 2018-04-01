@@ -25,6 +25,8 @@ void ml_protect_all_pages(struct mm_struct * mm);
 int ml_unprotect_page(struct mm_struct *mm, ulong address);
 int ml_protect_page(struct mm_struct *mm, ulong address);
 int ml_clear_accessed(struct mm_struct *mm, ulong address);
+int ml_set_accessed(struct mm_struct *mm, ulong address);
+int ml_clear_dirty(struct mm_struct *mm, ulong address);
 int ml_is_protected(struct mm_struct *mm, ulong address);
 int ml_is_present(struct mm_struct *mm, ulong address);
 int ml_is_dirty(struct mm_struct *mm, ulong address);
