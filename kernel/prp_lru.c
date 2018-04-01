@@ -482,6 +482,69 @@ int balance_lists(struct lpl *active_list, struct lpl *inactive_list, int target
 	return 0;
 }
 
+int try_to_free_pages(struct dime_instance_struct *dime_instance, struct lpl *pl, int target, struct lpl *free) {
+	struct list_head 	*iternode 					= NULL,
+						*iternode_free 				= NULL;
+	struct lpl_node_struct *node = NULL;
+	struct list_head local_free_list = LIST_HEAD_INIT(local_free_list);
+
+
+	write_lock(&pl->lock);
+	for(iternode = pl->head.next ; iternode != &pl->head && target > 0; iternode = iternode->next) {
+		struct mm_struct *mm;
+		int accessed, dirty;
+
+		node = list_entry(iternode, struct lpl_node_struct, list_node);
+		mm = ml_get_mm_struct(node->pid);
+		if(!mm) {
+			iternode = iternode->prev;
+			list_del_rcu(&node->list_node);
+			pl->size--;
+			list_add_tail_rcu(&node->list_node, &local_free_list);
+			target--;
+			continue;
+		}
+		accessed = ml_is_accessed(mm, node->address);
+		dirty = ml_is_dirty(mm, node->address);
+
+		if(dirty) {
+			// emulate page flush, inject delay
+			ulong delay_ns = 0, start_time = sched_clock();
+			delay_ns = ((PAGE_SIZE * 8ULL) * 1000000000ULL) / dime_instance->bandwidth_bps;  // Transmission delay
+			delay_ns += 2*dime_instance->latency_ns;                                         // Two way latency
+			while ((sched_clock() - start_time) < delay_ns) {
+			    // Wait for delay
+			}
+			ml_clear_dirty(mm, node->address);
+			ml_clear_accessed(mm, node->address);
+		} 
+		
+		if(!accessed) {
+			//list_del_rcu(node_to_evict_list_head);
+			//list_add_rcu(node_to_evict_list_head, node_to_evict);
+			iternode_free = iternode;
+			iternode = iternode->prev;
+			list_del_rcu(iternode_free);
+			pl->size--;
+			target--;
+			ml_clear_accessed(mm, node->address);
+			ml_protect_page(mm, node->address);
+			list_add_tail_rcu(iternode_free, &local_free_list);
+		}
+	}
+	write_unlock(&pl->lock);
+
+	write_lock(&free->lock);
+	while(!list_empty(&local_free_list)) {
+		struct list_head *h = local_free_list.next;
+		list_del_rcu(h);
+		list_add_tail_rcu(h, &free->head);
+		free->size++;
+	}
+	write_unlock(&free->lock);
+
+	return 0;
+}
 
 // move inactive page from active list
 int balance_local_page_lists(void) {
@@ -498,15 +561,19 @@ int balance_local_page_lists(void) {
 			continue;
 
 		if(prp_lru->free.size < (MIN_FREE_PAGES * dime_instance->local_npages)/100) {
-			int anon_size = prp_lru->active_an.size + prp_lru->inactive_an.size;
-			int pagecache_size = prp_lru->active_pc.size + prp_lru->inactive_pc.size;
+			int target_pi = prp_lru->inactive_pc.size - (18 * dime_instance->local_npages)/100;
+			int target_pa = prp_lru->active_pc.size   - (27 * dime_instance->local_npages)/100;
+			int target_ai = prp_lru->inactive_an.size - (18 * dime_instance->local_npages)/100;
+			int target_aa = prp_lru->active_an.size   - (27 * dime_instance->local_npages)/100;
+			target_pi = target_pi < 0 ? 0 : target_pi;
+			target_pa = target_pa < 0 ? 0 : target_pa;
+			target_ai = target_ai < 0 ? 0 : target_ai;
+			target_aa = target_aa < 0 ? 0 : target_aa;
 
-			if(pagecache_size > (45 * dime_instance->local_npages)/100) {
-				int target_pi = prp_lru->inactive_pc.size - (18 * dime_instance->local_npages)/100;
-				int target_pa = prp_lru->active_pc.size   - (27 * dime_instance->local_npages)/100;
-				target_pi = target_pi < 0 ? 0 : target_pi;
-				target_pa = target_pa < 0 ? 0 : target_pa;
-			}
+			try_to_free_pages(dime_instance, &prp_lru->inactive_pc, target_pi, &prp_lru->free);
+			try_to_free_pages(dime_instance, &prp_lru->inactive_an, target_ai, &prp_lru->free);
+			try_to_free_pages(dime_instance, &prp_lru->active_pc, target_pa, &prp_lru->free);
+			try_to_free_pages(dime_instance, &prp_lru->active_pc, target_aa, &prp_lru->free);
 		}
 
 		if(prp_lru->inactive_pc.size < (prp_lru->active_pc.size+prp_lru->inactive_pc.size)*40/100) {
