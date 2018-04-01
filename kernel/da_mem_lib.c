@@ -211,6 +211,46 @@ int ml_clear_accessed(struct mm_struct *mm, ulong address) {
 }
 EXPORT_SYMBOL(ml_clear_accessed);
 
+int ml_set_accessed(struct mm_struct *mm, ulong address) {
+	struct vm_area_struct *vma = NULL;
+	pte_t* ptep = ml_get_ptep(mm, address);
+	if(ptep && pte_present(*ptep)) {		// TODO:: why check if present
+		// Protect page "address"
+		set_pte( ptep , pte_set_flags(*ptep, _PAGE_ACCESSED) );
+
+		vma = find_vma(mm, address);
+		if(vma == NULL || address >= vma->vm_end)
+			DA_WARNING("could not find vma for address: %lu", address);
+		else //if(flush_tlb_page_fp!=NULL)
+			flush_tlb_page(vma, address);
+
+		return 1;	// Success
+	}
+
+	return 0;		// Failure
+}
+EXPORT_SYMBOL(ml_set_accessed);
+
+int ml_clear_dirty(struct mm_struct *mm, ulong address) {
+	struct vm_area_struct *vma = NULL;
+	pte_t* ptep = ml_get_ptep(mm, address);
+	if(ptep && pte_present(*ptep)) {		// TODO:: why check if present
+		// Protect page "address"
+		set_pte( ptep , pte_clear_flags(*ptep, _PAGE_DIRTY) );
+
+		vma = find_vma(mm, address);
+		if(vma == NULL || address >= vma->vm_end)
+			DA_WARNING("could not find vma for address: %lu", address);
+		else //if(flush_tlb_page_fp!=NULL)
+			flush_tlb_page(vma, address);
+
+		return 1;	// Success
+	}
+
+	return 0;		// Failure
+}
+EXPORT_SYMBOL(ml_clear_dirty);
+
 int ml_is_protected(struct mm_struct *mm, ulong address) {
 	pte_t* ptep = ml_get_ptep(mm, address);
 	if(ptep) {
