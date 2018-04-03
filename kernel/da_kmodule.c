@@ -28,8 +28,8 @@ unsigned int da_debug_flag =    DA_DEBUG_ALERT_FLAG
                                 | DA_DEBUG_INFO_FLAG
                                 | DA_DEBUG_WARNING_FLAG
                                 | DA_DEBUG_ERROR_FLAG
-                                | DA_DEBUG_ENTRYEXIT_FLAG
-                                //| DA_DEBUG_DEBUG_FLAG
+                                //| DA_DEBUG_ENTRYEXIT_FLAG
+                                | DA_DEBUG_DEBUG_FLAG
                                 ;
 EXPORT_SYMBOL(da_debug_flag);
 
