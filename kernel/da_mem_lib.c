@@ -349,15 +349,13 @@ struct task_struct * ml_get_task_struct(pid_t pid) {
 
 	ps = find_get_pid(pid);
 	if(!ps) {
-		DA_ERROR("could not find struct pid for PID:%d", pid);
-	//test_list(0);
+		//DA_ERROR("could not find struct pid for PID:%d", pid);
 		return NULL;   /* No such process */
 	}
 
 	ts = pid_task(ps, PIDTYPE_PID);
 	if(!ts) {
-		DA_ERROR("could not find task_struct for PID:%d", pid);
-	//test_list(0);
+		//DA_ERROR("could not find task_struct for PID:%d", pid);
 		return NULL;   /* No such process */
 	}
 

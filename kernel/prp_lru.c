@@ -146,9 +146,15 @@ retry_node_search:
 					ml_clear_accessed(mm, node->address);
 					list_add_tail_rcu(&(node->list_node), &temp_list);
 				} else {
-					list_del_rcu(&(node->list_node));
+					node_to_evict = iternode;
+
+					// reposition list head to this point, so that next time we wont scan again previously scanned nodes
+					list_del_rcu(&prp_lru->inactive_pc.head);
+					list_add_rcu(&prp_lru->inactive_pc.head, node_to_evict);
+
+					list_del_rcu(node_to_evict);
 					prp_lru->inactive_pc.size--;
-					node_to_evict = &(node->list_node);
+
 					DA_INFO("found a page from inactive pc, %lu, %d", node->address, prp_lru->inactive_pc.size);
 					DA_LRU_STAT(prp_lru);
 					break;
@@ -195,9 +201,15 @@ retry_node_search:
 					ml_clear_accessed(mm, node->address);
 					list_add_tail_rcu(&(node->list_node), &temp_list);
 				} else {
-					list_del_rcu(&(node->list_node));
+					node_to_evict = iternode;
+
+					// reposition list head to this point, so that next time we wont scan again previously scanned nodes
+					list_del_rcu(&prp_lru->inactive_an.head);
+					list_add_rcu(&prp_lru->inactive_an.head, node_to_evict);
+
+					list_del_rcu(node_to_evict);
+
 					prp_lru->inactive_an.size--;
-					node_to_evict = &(node->list_node);
 					DA_INFO("found a page from inactive an, %lu, %d", node->address, prp_lru->inactive_an.size);
 					DA_LRU_STAT(prp_lru);
 					break;
@@ -243,9 +255,14 @@ retry_node_search:
 					list_add_tail_rcu(&(node->list_node), &prp_lru->active_pc.head);
 					//DA_INFO("not selecting this page since accessed or dirty active pc, %lu, %d", node->address, prp_lru->active_pc.size);
 				} else {
-					list_del_rcu(&(node->list_node));
+					node_to_evict = iternode;
+
+					// reposition list head to this point, so that next time we wont scan again previously scanned nodes
+					list_del_rcu(&prp_lru->active_pc.head);
+					list_add_rcu(&prp_lru->active_pc.head, node_to_evict);
+
+					list_del_rcu(node_to_evict);
 					prp_lru->active_pc.size--;
-					node_to_evict = &(node->list_node);
 					DA_INFO("found a page from active pc, %lu, %d", node->address, prp_lru->active_pc.size);
 					DA_LRU_STAT(prp_lru);
 					break;
@@ -279,9 +296,14 @@ retry_node_search:
 					//ml_clear_dirty(mm, node->address);		// TODO:: create new list of dirty pages, kswapd will flush these pages
 					list_add_tail_rcu(&(node->list_node), &prp_lru->active_an.head);
 				} else {
-					list_del_rcu(&(node->list_node));
+					node_to_evict = iternode;
+
+					// reposition list head to this point, so that next time we wont scan again previously scanned nodes
+					list_del_rcu(&prp_lru->active_an.head);
+					list_add_rcu(&prp_lru->active_an.head, node_to_evict);
+
+					list_del_rcu(node_to_evict);
 					prp_lru->active_an.size--;
-					node_to_evict = &(node->list_node);
 					DA_INFO("found a page from active an, %lu, %d", node->address, prp_lru->active_an.size);
 					DA_LRU_STAT(prp_lru);
 					break;
@@ -357,8 +379,6 @@ retry_node_search:
 			ret_execute_delay = 1;
 			ml_clear_dirty(old_mm, node->address);
 			// TODO:: instead insert address to flush dirty pages list
-		} else {
-			ret_execute_delay = 0;
 		}
 
 		ml_protect_page(ml_get_mm_struct(node->pid), node->address);
@@ -457,6 +477,11 @@ int balance_lists(struct lpl *active_list, struct lpl *inactive_list, int target
 			list_add_tail_rcu(iternode_free, &local_inactive_list);
 		}
 	}
+	// reposition list head to this point, so that next time we wont scan again previously scanned nodes
+	if(iternode != &active_list->head) {
+		list_del_rcu(&active_list->head);
+		list_add_tail_rcu(&active_list->head, iternode);
+	}
 	write_unlock(&active_list->lock);
 	// TODO::update head pointer
 
@@ -520,8 +545,6 @@ int try_to_free_pages(struct dime_instance_struct *dime_instance, struct lpl *pl
 		} 
 		
 		if(!accessed) {
-			//list_del_rcu(node_to_evict_list_head);
-			//list_add_rcu(node_to_evict_list_head, node_to_evict);
 			iternode_free = iternode;
 			iternode = iternode->prev;
 			list_del_rcu(iternode_free);
@@ -531,6 +554,11 @@ int try_to_free_pages(struct dime_instance_struct *dime_instance, struct lpl *pl
 			ml_protect_page(mm, node->address);
 			list_add_tail_rcu(iternode_free, &local_free_list);
 		}
+	}
+	// reposition list head to this point, so that next time we wont scan again previously scanned nodes
+	if(iternode != &pl->head) {
+		list_del_rcu(&pl->head);
+		list_add_tail_rcu(&pl->head, iternode);
 	}
 	write_unlock(&pl->lock);
 
