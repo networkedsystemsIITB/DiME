@@ -462,8 +462,9 @@ int balance_lists(struct lpl *active_list, struct lpl *inactive_list, int target
 	struct lpl_node_struct *node = NULL;
 	struct list_head local_free_list = LIST_HEAD_INIT(local_free_list);
 	struct list_head local_inactive_list = LIST_HEAD_INIT(local_inactive_list);
+	struct list_head local_active_list = LIST_HEAD_INIT(local_active_list);
 
-
+	// move non-accessed pages to inactive list
 	write_lock(&active_list->lock);
 	for(iternode = active_list->head.next ; iternode != &active_list->head && target > 0; iternode = iternode->next) {
 		struct mm_struct *mm;
@@ -494,8 +495,6 @@ int balance_lists(struct lpl *active_list, struct lpl *inactive_list, int target
 			ml_clear_dirty(mm, node->address);
 		}*/
 		if(!accessed) {
-			//list_del_rcu(node_to_evict_list_head);
-			//list_add_rcu(node_to_evict_list_head, node_to_evict);
 			iternode_free = iternode;
 			iternode = iternode->prev;
 			list_del_rcu(iternode_free);
@@ -514,7 +513,42 @@ int balance_lists(struct lpl *active_list, struct lpl *inactive_list, int target
 		list_add_tail_rcu(&active_list->head, iternode);
 	}
 	write_unlock(&active_list->lock);
-	// TODO::update head pointer
+
+
+	// move accessed pages to active list
+	write_lock(&inactive_list->lock);
+	for(iternode = inactive_list->head.next ; iternode != &inactive_list->head; iternode = iternode->next) {
+		struct mm_struct *mm;
+		int accessed;
+
+		node = list_entry(iternode, struct lpl_node_struct, list_node);
+		mm = ml_get_mm_struct(node->pid);
+		if(!mm) {
+			iternode = iternode->prev;
+			list_del_rcu(&node->list_node);
+			inactive_list->size--;
+			list_add_tail_rcu(&node->list_node, &local_free_list);
+			target--;
+			moved_free++;
+			continue;
+		}
+		accessed = ml_is_accessed(mm, node->address);
+
+		if(accessed) {
+			iternode_free = iternode;
+			iternode = iternode->prev;
+			list_del_rcu(iternode_free);
+			inactive_list->size--;
+			list_add_tail_rcu(iternode_free, &local_active_list);
+			moved_inactive--;
+			//DA_LRU_STAT();
+		}
+
+		ml_clear_accessed(mm, node->address);
+	}
+	write_unlock(&inactive_list->lock);
+
+
 
 	write_lock(&free->lock);
 	while(!list_empty(&local_free_list)) {
@@ -525,6 +559,14 @@ int balance_lists(struct lpl *active_list, struct lpl *inactive_list, int target
 	}
 	write_unlock(&free->lock);
 
+	write_lock(&active_list->lock);
+	while(!list_empty(&local_active_list)) {
+		struct list_head *h = local_active_list.next;
+		list_del_rcu(h);
+		list_add_tail_rcu(h, &active_list->head);
+		active_list->size++;
+	}
+	write_unlock(&active_list->lock);
 
 	write_lock(&inactive_list->lock);
 	while(!list_empty(&local_inactive_list)) {
@@ -611,6 +653,7 @@ int try_to_free_pages(struct dime_instance_struct *dime_instance, struct lpl *pl
 	DA_ERROR("moved_free: %d \tremaining: %d", moved_free, target);
 	return moved_free;
 }
+
 
 // move inactive page from active list
 int balance_local_page_lists(void) {
