@@ -38,13 +38,21 @@ static struct prp_lru_struct *to_prp_lru_struct(struct page_replacement_policy_s
 	return container_of(prp, struct prp_lru_struct, prp);
 }
 
-void DA_LRU_STAT(struct prp_lru_struct *prp_lru) {
-	DA_INFO("in_pc: %d \ta_pc: %d \tin_an: %d \ta_an: %d \tcount: %lu",  prp_lru->inactive_pc.size,
-															prp_lru->active_pc.size,
-															prp_lru->inactive_an.size,
-															prp_lru->active_an.size,
-															prp_lru->lpl_count);
-}
+#define DA_LRU_STAT(void) do { \
+	int i=0;\
+	for(i=0 ; i<dime.dime_instances_size ; ++i) { \
+		struct dime_instance_struct *dime_instance = &(dime.dime_instances[i]); \
+		struct prp_lru_struct *prp_lru = to_prp_lru_struct(dime_instance->prp); \
+		\
+		DA_ERROR("inst: %d free: %d \tin_pc: %d \ta_pc: %d \tin_an: %d \ta_an: %d \tcount: %lu",  i, \
+																prp_lru->free.size, \
+																prp_lru->inactive_pc.size, \
+																prp_lru->active_pc.size, \
+																prp_lru->inactive_an.size, \
+																prp_lru->active_an.size, \
+																prp_lru->lpl_count); \
+	} \
+}while(0)
 
 int lpl_AddPage(struct dime_instance_struct *dime_instance, struct mm_struct * mm, ulong address) {
 	struct lpl_node_struct *node = NULL;
@@ -52,7 +60,8 @@ int lpl_AddPage(struct dime_instance_struct *dime_instance, struct mm_struct * m
 	struct prp_lru_struct *prp_lru = to_prp_lru_struct(dime_instance->prp);
 	struct page *page = NULL;
 
-	DA_INFO("pagefault for %lu", address);
+	//DA_ERROR("pagefault for %lu", address);
+	//DA_LRU_STAT();
 	// pages in local memory more than the configured dime instance quota, evict extra pages
 	// possible when instance configuration is changed dynamically using proc file /proc/dime_config
 	if(dime_instance->local_npages < prp_lru->lpl_count) {
@@ -143,7 +152,7 @@ retry_node_search:
 					iternode = iternode->prev;
 					list_del_rcu(&(node->list_node));
 					prp_lru->inactive_pc.size--;
-					ml_clear_accessed(mm, node->address);
+					//ml_clear_accessed(mm, node->address);
 					list_add_tail_rcu(&(node->list_node), &temp_list);
 				} else {
 					node_to_evict = iternode;
@@ -155,8 +164,8 @@ retry_node_search:
 					list_del_rcu(node_to_evict);
 					prp_lru->inactive_pc.size--;
 
-					DA_INFO("found a page from inactive pc, %lu, %d", node->address, prp_lru->inactive_pc.size);
-					DA_LRU_STAT(prp_lru);
+					//DA_INFO("found a page from inactive pc, %lu, %d", node->address, prp_lru->inactive_pc.size);
+					//DA_LRU_STAT();
 					break;
 				}
 
@@ -198,7 +207,7 @@ retry_node_search:
 					iternode = iternode->prev;
 					list_del_rcu(&(node->list_node));
 					prp_lru->inactive_an.size--;
-					ml_clear_accessed(mm, node->address);
+					//ml_clear_accessed(mm, node->address);
 					list_add_tail_rcu(&(node->list_node), &temp_list);
 				} else {
 					node_to_evict = iternode;
@@ -210,8 +219,8 @@ retry_node_search:
 					list_del_rcu(node_to_evict);
 
 					prp_lru->inactive_an.size--;
-					DA_INFO("found a page from inactive an, %lu, %d", node->address, prp_lru->inactive_an.size);
-					DA_LRU_STAT(prp_lru);
+					//DA_INFO("found a page from inactive an, %lu, %d", node->address, prp_lru->inactive_an.size);
+					//DA_LRU_STAT();
 					break;
 				}
 
@@ -232,6 +241,8 @@ retry_node_search:
 		if(!node_to_evict) {
 			// search from pagecache active list
 			// TODO:: decide based on some criterion whether to evict pages from this list
+			struct list_head temp_list = LIST_HEAD_INIT(temp_list);
+
 			write_lock(&prp_lru->active_pc.lock);
 			for(iternode = prp_lru->active_pc.head.next ; iternode != &prp_lru->active_pc.head ; iternode = iternode->next) {
 				struct mm_struct *mm;
@@ -250,9 +261,10 @@ retry_node_search:
 				if(accessed) {// || dirty) {
 					iternode = iternode->prev;
 					list_del_rcu(&(node->list_node));
-					ml_clear_accessed(mm, node->address);
+					//ml_clear_accessed(mm, node->address);
 					//ml_clear_dirty(mm, node->address);		// TODO:: create new list of dirty pages, kswapd will flush these pages
-					list_add_tail_rcu(&(node->list_node), &prp_lru->active_pc.head);
+					//list_add_tail_rcu(&(node->list_node), &prp_lru->active_pc.head);
+					list_add_tail_rcu(&(node->list_node), &temp_list);
 					//DA_INFO("not selecting this page since accessed or dirty active pc, %lu, %d", node->address, prp_lru->active_pc.size);
 				} else {
 					node_to_evict = iternode;
@@ -263,10 +275,16 @@ retry_node_search:
 
 					list_del_rcu(node_to_evict);
 					prp_lru->active_pc.size--;
-					DA_INFO("found a page from active pc, %lu, %d", node->address, prp_lru->active_pc.size);
-					DA_LRU_STAT(prp_lru);
+					//DA_INFO("found a page from active pc, %lu, %d", node->address, prp_lru->active_pc.size);
+					//DA_LRU_STAT();
 					break;
 				}
+			}
+
+			while(!list_empty(&temp_list)) {
+				struct list_head *h = temp_list.next;
+				list_del_rcu(h);
+				list_add_tail_rcu(h, &prp_lru->active_pc.head);
 			}
 			write_unlock(&prp_lru->active_pc.lock);
 		}
@@ -274,6 +292,8 @@ retry_node_search:
 		if(!node_to_evict) {
 			// search from anon active list
 			// TODO:: decide based on some criterion whether to evict pages from this list
+			struct list_head temp_list = LIST_HEAD_INIT(temp_list);
+
 			write_lock(&prp_lru->active_an.lock);
 			for(iternode = prp_lru->active_an.head.next ; iternode != &prp_lru->active_an.head ; iternode = iternode->next) {
 				struct mm_struct *mm;
@@ -292,9 +312,9 @@ retry_node_search:
 				if(accessed) {// || dirty) {
 					iternode = iternode->prev;
 					list_del_rcu(&(node->list_node));
-					ml_clear_accessed(mm, node->address);
+					//ml_clear_accessed(mm, node->address);
 					//ml_clear_dirty(mm, node->address);		// TODO:: create new list of dirty pages, kswapd will flush these pages
-					list_add_tail_rcu(&(node->list_node), &prp_lru->active_an.head);
+					list_add_tail_rcu(&(node->list_node), &temp_list);
 				} else {
 					node_to_evict = iternode;
 
@@ -304,11 +324,17 @@ retry_node_search:
 
 					list_del_rcu(node_to_evict);
 					prp_lru->active_an.size--;
-					DA_INFO("found a page from active an, %lu, %d", node->address, prp_lru->active_an.size);
-					DA_LRU_STAT(prp_lru);
+					//DA_INFO("found a page from active an, %lu, %d", node->address, prp_lru->active_an.size);
+					//DA_LRU_STAT();
 					break;
 				}
 
+			}
+
+			while(!list_empty(&temp_list)) {
+				struct list_head *h = temp_list.next;
+				list_del_rcu(h);
+				list_add_tail_rcu(h, &prp_lru->active_an.head);
 			}
 			write_unlock(&prp_lru->active_an.lock);
 		}
@@ -320,8 +346,8 @@ retry_node_search:
 				node_to_evict = prp_lru->inactive_pc.head.next;
 				list_del_rcu(node_to_evict);
 					prp_lru->inactive_pc.size--;
-				DA_WARNING("could not find a page to evict, selecting first page from inactive pagecache");
-					DA_LRU_STAT(prp_lru);
+					DA_WARNING("could not find a page to evict, selecting first page from inactive pagecache");
+					//DA_LRU_STAT();
 			}
 			write_unlock(&prp_lru->inactive_pc.lock);
 
@@ -332,7 +358,7 @@ retry_node_search:
 					list_del_rcu(node_to_evict);
 					prp_lru->inactive_an.size--;
 					DA_WARNING("could not find a page to evict, selecting first page from inactive anon");
-					DA_LRU_STAT(prp_lru);
+					//DA_LRU_STAT();
 				}
 				write_unlock(&prp_lru->inactive_an.lock);
 			}
@@ -344,7 +370,7 @@ retry_node_search:
 					list_del_rcu(node_to_evict);
 					prp_lru->active_pc.size--;
 					DA_WARNING("could not find a page to evict, selecting first page from active pagecache");
-					DA_LRU_STAT(prp_lru);
+					//DA_LRU_STAT();
 				}
 				write_unlock(&prp_lru->active_pc.lock);
 
@@ -357,7 +383,7 @@ retry_node_search:
 					list_del_rcu(node_to_evict);
 					prp_lru->active_an.size--;
 					DA_WARNING("could not find a page to evict, selecting first page from active anon");
-					DA_LRU_STAT(prp_lru);
+					//DA_LRU_STAT();
 				}
 				write_unlock(&prp_lru->active_an.lock);
 			}
@@ -430,6 +456,7 @@ size of anonymous inactive list = Maybe 30% of anonymous pages on a 1GB system, 
 #define MIN_FREE_PAGES 10	// percentage of local memory available in free list
 
 int balance_lists(struct lpl *active_list, struct lpl *inactive_list, int target, struct lpl *free) {
+	int moved_inactive=0, moved_free=0;
 	struct list_head 	*iternode 					= NULL,
 						*iternode_free 				= NULL;
 	struct lpl_node_struct *node = NULL;
@@ -450,6 +477,7 @@ int balance_lists(struct lpl *active_list, struct lpl *inactive_list, int target
 			active_list->size--;
 			list_add_tail_rcu(&node->list_node, &local_free_list);
 			target--;
+			moved_free++;
 			continue;
 		}
 		accessed = ml_is_accessed(mm, node->address);
@@ -473,9 +501,12 @@ int balance_lists(struct lpl *active_list, struct lpl *inactive_list, int target
 			list_del_rcu(iternode_free);
 			active_list->size--;
 			target--;
-			ml_clear_accessed(mm, node->address);
 			list_add_tail_rcu(iternode_free, &local_inactive_list);
+			moved_inactive++;
+			//DA_LRU_STAT();
 		}
+
+		ml_clear_accessed(mm, node->address);
 	}
 	// reposition list head to this point, so that next time we wont scan again previously scanned nodes
 	if(iternode != &active_list->head) {
@@ -504,10 +535,13 @@ int balance_lists(struct lpl *active_list, struct lpl *inactive_list, int target
 	}
 	write_unlock(&inactive_list->lock);
 
+	DA_LRU_STAT();
+	DA_ERROR("moved_inactive: %d \tmoved_free: %d \tremaining: %d", moved_inactive, moved_free, target);
 	return 0;
 }
 
 int try_to_free_pages(struct dime_instance_struct *dime_instance, struct lpl *pl, int target, struct lpl *free) {
+	int moved_free=0;
 	struct list_head 	*iternode 					= NULL,
 						*iternode_free 				= NULL;
 	struct lpl_node_struct *node = NULL;
@@ -527,6 +561,7 @@ int try_to_free_pages(struct dime_instance_struct *dime_instance, struct lpl *pl
 			pl->size--;
 			list_add_tail_rcu(&node->list_node, &local_free_list);
 			target--;
+			moved_free++;
 			continue;
 		}
 		accessed = ml_is_accessed(mm, node->address);
@@ -550,9 +585,10 @@ int try_to_free_pages(struct dime_instance_struct *dime_instance, struct lpl *pl
 			list_del_rcu(iternode_free);
 			pl->size--;
 			target--;
-			ml_clear_accessed(mm, node->address);
 			ml_protect_page(mm, node->address);
 			list_add_tail_rcu(iternode_free, &local_free_list);
+			moved_free++;
+			//DA_LRU_STAT();
 		}
 	}
 	// reposition list head to this point, so that next time we wont scan again previously scanned nodes
@@ -571,7 +607,9 @@ int try_to_free_pages(struct dime_instance_struct *dime_instance, struct lpl *pl
 	}
 	write_unlock(&free->lock);
 
-	return 0;
+	DA_LRU_STAT();
+	DA_ERROR("moved_free: %d \tremaining: %d", moved_free, target);
+	return moved_free;
 }
 
 // move inactive page from active list
@@ -581,6 +619,7 @@ int balance_local_page_lists(void) {
 	struct dime_instance_struct *dime_instance;
 
 	for(i=0 ; i<dime.dime_instances_size ; ++i) {
+		int free_target = 0;
 		dime_instance = &(dime.dime_instances[i]);
 		prp_lru = to_prp_lru_struct(dime_instance->prp);
 		if(prp_lru->lpl_count < dime_instance->local_npages)
@@ -588,32 +627,54 @@ int balance_local_page_lists(void) {
 			// no need to evict pages for this dime instance
 			continue;
 
-		if(prp_lru->free.size < (MIN_FREE_PAGES * dime_instance->local_npages)/100) {
-			int target_pi = prp_lru->inactive_pc.size - (18 * dime_instance->local_npages)/100;
+		free_target = (MIN_FREE_PAGES * dime_instance->local_npages)/100 - prp_lru->free.size;
+		if(free_target > 0) {
+			/*int target_pi = prp_lru->inactive_pc.size - (18 * dime_instance->local_npages)/100;
 			int target_pa = prp_lru->active_pc.size   - (27 * dime_instance->local_npages)/100;
 			int target_ai = prp_lru->inactive_an.size - (18 * dime_instance->local_npages)/100;
 			int target_aa = prp_lru->active_an.size   - (27 * dime_instance->local_npages)/100;
+			int total_diff;
+
 			target_pi = target_pi < 0 ? 0 : target_pi;
 			target_pa = target_pa < 0 ? 0 : target_pa;
 			target_ai = target_ai < 0 ? 0 : target_ai;
 			target_aa = target_aa < 0 ? 0 : target_aa;
 
+			total_diff = target_pi + target_pa + target_ai + target_aa;
+
+			target_pi = (free_target*target_pi)/total_diff;
+			target_pa = (free_target*target_pa)/total_diff;
+			target_ai = (free_target*target_ai)/total_diff;
+			target_aa = (free_target*target_aa)/total_diff;
+			
 			try_to_free_pages(dime_instance, &prp_lru->inactive_pc, target_pi, &prp_lru->free);
 			try_to_free_pages(dime_instance, &prp_lru->inactive_an, target_ai, &prp_lru->free);
 			try_to_free_pages(dime_instance, &prp_lru->active_pc, target_pa, &prp_lru->free);
 			try_to_free_pages(dime_instance, &prp_lru->active_pc, target_aa, &prp_lru->free);
+			*/
+			free_target = (MIN_FREE_PAGES * dime_instance->local_npages)/100 - prp_lru->free.size;
+			free_target > 0 ? try_to_free_pages(dime_instance, &prp_lru->inactive_pc, free_target, &prp_lru->free) : 0;
+			
+			free_target = (MIN_FREE_PAGES * dime_instance->local_npages)/100 - prp_lru->free.size;
+			free_target > 0 ? try_to_free_pages(dime_instance, &prp_lru->inactive_an, free_target, &prp_lru->free) : 0;
+			
+			free_target = (MIN_FREE_PAGES * dime_instance->local_npages)/100 - prp_lru->free.size;
+			free_target > 0 ? try_to_free_pages(dime_instance, &prp_lru->active_pc, free_target, &prp_lru->free) : 0;
+			
+			free_target = (MIN_FREE_PAGES * dime_instance->local_npages)/100 - prp_lru->free.size;
+			free_target > 0 ? try_to_free_pages(dime_instance, &prp_lru->active_pc, free_target, &prp_lru->free) : 0;
 		}
 
-		if(prp_lru->inactive_pc.size < (prp_lru->active_pc.size+prp_lru->inactive_pc.size)*40/100) {
+		/*if(prp_lru->inactive_pc.size < (prp_lru->active_pc.size+prp_lru->inactive_pc.size)*40/100)*/ {
 			// need to move passive pages from active pagecache list to inactive list
-			int target = (prp_lru->active_pc.size+prp_lru->inactive_pc.size)*40/100 - prp_lru->inactive_pc.size;
+			int target = prp_lru->active_pc.size;//(prp_lru->active_pc.size+prp_lru->inactive_pc.size)*40/100 - prp_lru->inactive_pc.size;
 			if(target>0)
 				balance_lists(&prp_lru->active_pc, &prp_lru->inactive_pc, target, &prp_lru->free);
 		}
 
-		if(prp_lru->inactive_an.size < (prp_lru->active_an.size+prp_lru->inactive_an.size)*40/100) {
+		/*if(prp_lru->inactive_an.size < (prp_lru->active_an.size+prp_lru->inactive_an.size)*40/100)*/ {
 			// need to move passive pages from active pagecache list to inactive list
-			int target = (prp_lru->active_an.size+prp_lru->inactive_an.size)*40/100 - prp_lru->inactive_an.size;
+			int target = prp_lru->active_an.size;//(prp_lru->active_an.size+prp_lru->inactive_an.size)*40/100 - prp_lru->inactive_an.size;
 			if(target>0)
 				balance_lists(&prp_lru->active_an, &prp_lru->inactive_an, target, &prp_lru->free);
 		}
@@ -627,7 +688,7 @@ static struct task_struct *dime_kswapd;
 static int dime_kswapd_fn(void *unused) {
 	allow_signal(SIGKILL);
 	while (!kthread_should_stop()) {
-
+		DA_LRU_STAT();
 		msleep(10);
 		if (signal_pending(dime_kswapd))
 			break;
@@ -654,6 +715,7 @@ void __lpl_CleanList (struct list_head *prp) {
 
 void lpl_CleanList (struct dime_instance_struct *dime_instance) {
 	struct prp_lru_struct *prp_lru = to_prp_lru_struct(dime_instance->prp);
+
 	__lpl_CleanList(&prp_lru->free.head);
 	__lpl_CleanList(&prp_lru->active_an.head);
 	__lpl_CleanList(&prp_lru->inactive_an.head);
@@ -708,7 +770,6 @@ int init_module(void) {
 
 		// Set policy pointer at the end of initialization
 		dime.dime_instances[i].prp = &(prp_lru->prp);
-		//lpl_Init(&dime.dime_instances[i]);
 		write_unlock(&prp_lru->lock);
 	}
 
