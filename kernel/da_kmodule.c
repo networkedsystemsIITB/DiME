@@ -159,6 +159,10 @@ int init_module(void) {
     HOOK_END_FN_NAME    = do_page_fault_hook_end_new;
     DA_INFO("hook insertion complete");
 
+    rwlock_init(&(dime.dime_instances[0].lock));
+
+    write_lock(&(dime.dime_instances[0].lock));
+
     for(i=0 ; i<pid_count ; ++i) {
         dime.dime_instances[0].pid[i] = pid[i];
         dime.dime_instances[0].pid_count++;
@@ -170,6 +174,7 @@ int init_module(void) {
     dime.dime_instances[0].page_fault_count = page_fault_count;
     dime.dime_instances_size                = 1;
 
+    write_unlock(&(dime.dime_instances[0].lock));
     goto init_good;
 
 init_bad:
@@ -233,8 +238,9 @@ int do_page_fault_hook_end_new (struct pt_regs *regs,
         // Inject delays here
 
         if(dime_instance->prp && dime_instance->prp->add_page && dime_instance->prp->add_page(dime_instance, current->mm, address) == 1) {
-
+            write_lock(&dime_instance->lock);
             dime_instance->page_fault_count++;
+            write_unlock(&dime_instance->lock);
 
             delay_ns = 0;
             delay_ns = ((PAGE_SIZE * 8ULL) * 1000000000ULL) / dime_instance->bandwidth_bps;  // Transmission delay
