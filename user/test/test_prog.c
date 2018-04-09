@@ -36,14 +36,14 @@ void sig_handler(int signo)
 void access_all_data() {
 	unsigned long long i=0;
 	for(i=0 ; i<npages ; i++) {
-		pages[i*getpagesize()+100]+=5;
+		pages[i*getpagesize()+100] = 5;
 	}
 }
 
 void access_last_data(unsigned long long last_npages) {
 	unsigned long long i=0;
 	for(i=npages-last_npages ; i<npages ; i++) {
-		pages[i*getpagesize()+100]+=5;
+		pages[i*getpagesize()+100] = 5;
 	}
 }
 
@@ -52,14 +52,14 @@ void sequential_access_test() {
 	unsigned long long t;
 	// sequential access
 	fault_count = 0;
-	printf("[TEST]:	Single sequential access test: \n[TEST]:	\t\tTime taken (ms) \t: ");
+	printf("[TEST]:	Single sequential access test: \n[TEST]:	\t\tTime taken (us) \t: ");
 	timer = clock();
 
 	access_all_data();
 
 	timer = clock() - timer;
-	printf("%lu\n", timer);
-	printf("TEST]:	\tExpected pagefault count \t: %llu", npages);
+	printf("%lu\n", (timer*1000000)/CLOCKS_PER_SEC);
+	printf("TEST]:	\tExpected pagefault count \t: %llu\n", npages);
 }
 
 void double_sequential_access_test() {
@@ -68,14 +68,14 @@ void double_sequential_access_test() {
 	unsigned long long t;
 	// sequential access
 	fault_count = 0;
-	printf("[TEST]:	Re-accessing last %llu pages: \n[TEST]:	\t\tTime taken (ms) \t: ", last_npages);
+	printf("[TEST]:	Re-accessing last %llu pages: \n[TEST]:	\t\tTime taken (us) \t: ", last_npages);
 	timer = clock();
 
 	access_all_data();
 	access_last_data(last_npages);
 
 	timer = clock() - timer;
-	printf("%lu\n", timer);
+	printf("%lu\n", (timer*1000000)/CLOCKS_PER_SEC);
 	/*if(npages <= 1000)
 		exp_pfcount = npages;
 	else
@@ -86,7 +86,6 @@ void double_sequential_access_test() {
 
 int main ( int argc, char *argv[] ) {
 	unsigned long long i=0;
-	clock_t timer;
 
 	if(argc < 2) {
 		printf("[TEST]:	number of pages required\n");
@@ -114,6 +113,11 @@ int main ( int argc, char *argv[] ) {
 		exit(2);
 	}
 
+	// first dummy run, allocates pages
+	// no way to know if the program has completed this first dummy access,
+	// so pagefault count may be incorrect, since module could get inserted in midway of completing the access.
+	//access_all_data();
+
 	// Wait for module to insert and signal from user space
 	printf("[TEST]:	Send signal to start tests..\n");
 
@@ -133,7 +137,6 @@ int main ( int argc, char *argv[] ) {
 
 void start_test() {
 	unsigned long long i=0, r=0;
-	clock_t timer;
 
 	printf("[TEST]:	Assumming module inserted and setup.\n");
 	printf("[TEST]:	Starting testcase %llu.\n", testcase);
