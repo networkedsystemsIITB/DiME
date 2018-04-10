@@ -3,6 +3,35 @@
 
 #include "common.h"
 
+struct stats_struct {
+	// # of pagefaults handled in different cases
+	ulong	free_evict;
+	ulong	active_pc_evict;
+	ulong	active_an_evict;
+	ulong	inactive_pc_evict;
+	ulong	inactive_an_evict;
+	ulong	force_active_pc_evict;
+	ulong	force_active_an_evict;
+	ulong	force_inactive_pc_evict;
+	ulong	force_inactive_an_evict;
+
+	// # of pages moved acros lists
+	ulong	pc_active_to_inactive_moved;	// by kswapd thread
+	ulong	an_active_to_inactive_moved;
+	ulong	pc_inactive_to_active_moved;
+	ulong	an_inactive_to_active_moved;
+	ulong	pc_inactive_to_active_pf_moved;	// by pagefault handler
+	ulong	an_inactive_to_active_pf_moved;
+	ulong	pc_active_to_free_moved;
+	ulong	an_active_to_free_moved;
+	ulong	pc_inactive_to_free_moved;
+	ulong	an_inactive_to_free_moved;
+
+	ulong	pc_pagefaults;
+	ulong	an_pagefaults;
+
+	rwlock_t lock;
+};
 
 struct prp_lru_struct {
 	struct page_replacement_policy_struct prp;
@@ -13,6 +42,9 @@ struct prp_lru_struct {
 	struct lpl inactive_an;
 	struct lpl free;
 	ulong lpl_count;
+
+	struct stats_struct stats;
+
 	rwlock_t lock;
 };
 
