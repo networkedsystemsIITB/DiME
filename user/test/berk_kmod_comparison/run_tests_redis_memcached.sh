@@ -81,6 +81,19 @@ function kmod_insert_module {
 		pid1=$instance2_pid
 	fi &&
 
+
+	# pin process threads to CPU cores
+	cpus=`ssh root@$server_ip "nproc --all"`;
+	cpuid=0;
+	for pinpid in `ssh root@$server_ip "ps -p $instance1_pid -o tid= -L | sort -n"`; do
+		echo "Pinning process1 $process1 : $instance1_pid thread $pinpid to CPU $cpuid";
+		ssh root@$server_ip "taskset -pc $cpuid $pinpid";
+		cpuid=$((cpuid+1));
+		cpuid=$((cpuid%cpus));
+	done;
+
+
+
 	if [ "$enable_module" == "kmod_fifo" ]; then
 		kmod_prp_path_on_server=$kmod_prp_fifo_path_on_server
 	elif [ "$enable_module" == "kmod_lru" ]; then
@@ -96,6 +109,14 @@ function kmod_insert_module {
 		fi &&
 		insmod $kmod_prp_path_on_server || exit 2;
 	" || exit 1
+
+
+	if [ "$enable_module" == "kmod_lru" ]; then
+		# pin kswapd thread to next CPU
+		dime_kswapd_pid=`ssh root@$server_ip "ps aux | grep dime_kswapd | grep -v grep | head -n1 | sed 's/[ \t]\+/\t/g' | cut -f 2"`
+		echo "Pinning kswapd thread $dime_kswapd_pid to CPU $cpuid";
+		ssh root@$server_ip "taskset -pc $cpuid $dime_kswapd_pid";
+	fi
 }
 
 
@@ -140,7 +161,7 @@ function redis_load {
 			-P $redis_workload_config \
 			-p "redis.host=$server_ip" \
 			-p "redis.port=$redis_port" \
-			-threads 10
+			-threads 15
 	popd > /dev/null
 }
 
@@ -160,7 +181,7 @@ function memcached_load {
 		./bin/ycsb load memcached -s \
 			-P $workload_config \
 			-p "memcached.hosts=${server_ip}:${server_port}" \
-			-threads 10
+			-threads 15
 	popd > /dev/null
 }
 
@@ -181,7 +202,7 @@ function redis_run {
 			-P $redis_workload_config \
 			-p "redis.host=$server_ip" \
 			-p "redis.port=$redis_port" \
-			-threads 10
+			-threads 15
 	popd > /dev/null
 }
 
@@ -201,7 +222,7 @@ function memcached_run {
 		./bin/ycsb run memcached -s \
 			-P $workload_config \
 			-p "memcached.hosts=${server_ip}:${server_port}" \
-			-threads 10
+			-threads 15
 	popd > /dev/null
 }
 
@@ -265,6 +286,11 @@ function run_processes {
 
 		kmod_get_module_stats >> ${testfile_prefix}-instance-1-load.log
 
+		if [ "$enable_module" == "kmod_fifo" -o "$enable_module" == "kmod_lru" ]; then
+			ssh root@$server_ip "cat /proc/dime_config" > ${testfile_prefix}-load-kmod_stats.log
+			ssh root@$server_ip "cat /proc/dime_prp_config" > ${testfile_prefix}-load-kmod_prp_stats.log
+		fi
+
 		if [ ! $test_mode = single ]
 		then
 			run_process 2 &
@@ -279,7 +305,13 @@ function run_processes {
 
 		kmod_get_module_stats >> ${testfile_prefix}-instance-1-run.log
 
+		if [ "$enable_module" == "kmod_fifo" -o "$enable_module" == "kmod_lru" ]; then
+			ssh root@$server_ip "cat /proc/dime_config" > ${testfile_prefix}-run-kmod_stats.log
+			ssh root@$server_ip "cat /proc/dime_prp_config" > ${testfile_prefix}-run-kmod_prp_stats.log
+		fi
+
 		ssh root@$server_ip "dmesg -c" > ${testfile_prefix}-dmesg.log
+		
 	popd > /dev/null
 }
 
@@ -318,6 +350,10 @@ function run_test {
 		testname="test-${testcase}-berk-insert_module-${enable_module}-test_mode-${test_mode}-process1-${process1}-process2-${process2}-percent_local_mem-${percent_local_mem}-remote_mem-${berk_remote_memory_gb}-latency-${berk_latency_us}-bandwidth-${berk_bandwith_gbps}"
 		testfile_prefix=$curdir/$testname
 	fi
+
+
+	#echo "Module has been inserted, press ENTER after starting stab probe";
+	#read -r
 
 	run_processes
 }
@@ -360,21 +396,23 @@ function run_single_test {
 	kmod_latency_ns=2500
 	kmod_bandwidth_bps=100000000000
 	kmod_local_npages=1000000000
-	for enable_module in "kmod_lru" "kmod_fifo";
+	for kmod_latency_ns in 200000; #2500 10000 15000 40000 60000 100000 150000 200000; # 10 20 30 40 50 60
 	do
-		for kmod_latency_ns in 2500 5000 7500 10000 12500 15000 20000 40000 60000 100000 150000 200000; # 10 20 30 40 50 60
+		for kmod_local_npages in 50000; #50000 100000; # 100000 150000; #25000 50000 75000 100000 125000 150000; # 10 20 30 40 50 60
 		do
-			for kmod_local_npages in 25000 50000 75000 100000 125000 150000; # 10 20 30 40 50 60
+			temp_local_npages=$kmod_local_npages;
+
+			for test_mode in "single" ; #"separate" "shared"; ###############################################"separate" "shared" "multisingle";
 			do
-				temp_local_npages=$kmod_local_npages;
-				for test_mode in "single" ; #"separate" "shared"; ###############################################"separate" "shared" "multisingle";
+				if [ "$test_mode" == "shared" ];
+				then
+					kmod_local_npages=$((temp_local_npages*2));
+				else
+					kmod_local_npages=$temp_local_npages;
+				fi
+
+				for enable_module in "kmod_lru" "kmod_fifo";
 				do
-					if [ "$test_mode" == "shared" ];
-					then
-						kmod_local_npages=$((kmod_local_npages*2));
-					else
-						kmod_local_npages=$temp_local_npages;
-					fi
 					run_test
 				done
 			done
