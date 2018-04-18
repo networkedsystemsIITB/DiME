@@ -13,6 +13,8 @@
 #include <linux/list.h>
 #include <linux/slab.h>
 #include <asm/pgtable_types.h>
+#include <linux/proc_fs.h>
+#include <asm/uaccess.h>
 
 #include "da_mem_lib.h"
 
@@ -40,58 +42,94 @@ static struct prp_fifo_struct *to_prp_fifo_struct(struct page_replacement_policy
 	return ret;
 }
 
-/*int lpl_Initialize(ulong size) {
-	if (!lpl_local_pages) {
-		// TODO:: protect all pages first
-		kfree(lpl_local_pages);
-		lpl_local_pages = NULL;
-		lpl_lasti = 0;
-		lpl_local_npages = 0;
-	}
 
-	lpl_local_pages = (ulong *)kmalloc(size, GFP_KERNEL);
 
-	if(lpl_local_pages) {
-		lpl_local_npages = size;
-		return 0;
-	} else {
+
+
+
+#define PROCFS_MAX_SIZE		102400
+#define PROCFS_NAME			"dime_prp_config"
+static char procfs_buffer[PROCFS_MAX_SIZE];     // The buffer used to store character for this module
+static unsigned long procfs_buffer_size = 0;    // The size of the buffer
+
+static ssize_t procfile_read(struct file*, char*, size_t, loff_t*);
+static ssize_t procfile_write(struct file *, const char *, size_t, loff_t *);
+
+struct proc_dir_entry *dime_config_entry;
+
+static struct file_operations cmd_file_ops = {  
+	.owner = THIS_MODULE,
+	.read = procfile_read,
+	.write = procfile_write,
+};
+
+int init_dime_prp_config_procfs(void) {
+	dime_config_entry = proc_create(PROCFS_NAME, S_IFREG | S_IRUGO, NULL, &cmd_file_ops);
+
+	if (dime_config_entry == NULL) {
+		remove_proc_entry(PROCFS_NAME, NULL);
+
+		DA_ALERT("could not initialize /proc/%s\n", PROCFS_NAME);
 		return -ENOMEM;
 	}
-}*/
 
-/*
-int test_list(struct dime_instance_struct *dime_instance, ulong address) {
+	/*
+	 * KUIDT_INIT is a macro defined in the file 'linux/uidgid.h'. KGIDT_INIT also appears here.
+	 */
+	proc_set_user(dime_config_entry, KUIDT_INIT(0), KGIDT_INIT(0));
+	proc_set_size(dime_config_entry, 37);
 
-	int location=0;
-	struct list_head *lnode = NULL;
-	struct lpl_node_struct *node;
+	DA_INFO("proc entry \"/proc/%s\" created\n", PROCFS_NAME);
+	return 0;
+}
 
-	location=0;
-	list_for_each(lnode, &lpl_head) {
-		location++;
-		node = list_entry(lnode, struct lpl_node_struct, list_node);
-		if (node->pid <= 0) {
-			DA_ERROR("\tPID value invalid : %d,  address : %lu", node->pid, node->address); 
+void cleanup_dime_prp_config_procfs(void) {
+	remove_proc_entry(PROCFS_NAME, NULL);
+	DA_INFO("proc entry \"/proc/%s\" removed\n", PROCFS_NAME);
+}
+
+static ssize_t procfile_read(struct file *file, char *buffer, size_t length, loff_t *offset) {
+	int ret;
+	int seg_size;
+	
+	if(*offset == 0) {
+		// offset is 0, so first call to read the file.
+		// Initialize buffer with config parameters currently set
+		int i;
+		//											 1  2           3
+		procfs_buffer_size = sprintf(procfs_buffer, "id pc_pf_count an_pf_count\n");
+		for(i=0 ; i<dime.dime_instances_size ; ++i) {
+			struct prp_fifo_struct *prp = to_prp_fifo_struct(dime.dime_instances[i].prp);
+			procfs_buffer_size += sprintf(procfs_buffer+procfs_buffer_size, 
+											//1  2     3
+											"%2d %11lu %11lu\n", 
+																		dime.dime_instances[i].instance_id,	// 1
+																		prp->stats.pc_pagefaults,			// 2
+																		prp->stats.an_pagefaults);			// 3
 		}
 	}
 
-	
-	pte_t* ptep = ml_get_ptep(current->mm, address);
-	//DA_WARNING(" for address found in list : address = %lu", address);
-	if (ptep)
-		DA_WARNING("inserted :: flags : prot:%-4lu present:%-4lu inlist:%-4lu %lu",
-											pte_flags(*ptep) & _PAGE_PROTNONE,
-											pte_flags(*ptep) & _PAGE_PRESENT,
-											pte_flags(*ptep) & _PAGE_SOFTW2,
-											address);
-	return 0;
-}
-*/
+	// calculate max size of block that can be read
+	seg_size = length < procfs_buffer_size ? length : procfs_buffer_size;
+	if (*offset >= procfs_buffer_size) {
+		ret  = 0;   // offset value beyond the available data to read, finish reading
+	} else {
+		memcpy(buffer, procfs_buffer, seg_size);
+		*offset += seg_size;    // increment offset value
+		ret = seg_size;         // return number of bytes read
+	}
 
+	return ret;
+}
+
+static ssize_t procfile_write(struct file *file, const char *buffer, size_t length, loff_t *offset) {
+	return length;
+}
 
 int lpl_AddPage(struct dime_instance_struct *dime_instance, struct mm_struct * mm, ulong address) {
 	struct lpl_node_struct *node = NULL;
 	int ret_execute_delay = 0;
+	struct page *page = NULL;
 	struct prp_fifo_struct *prp_fifo = to_prp_fifo_struct(dime_instance->prp);
 	//struct list_head *lnode = NULL;
 
@@ -156,10 +194,23 @@ int lpl_AddPage(struct dime_instance_struct *dime_instance, struct mm_struct * m
 	// ml_set_inlist(mm, address);
 	// ml_unprotect_page(mm, address);		// no page fault for pages in list // might be reason for crash, bad swap entry
 
+
+	page = ml_get_page_sruct(mm, address);
+	
+	if( ((unsigned long)(page->mapping) & (unsigned long)0x01) != 0 ) {
+		write_lock(&prp_fifo->stats.lock);
+		prp_fifo->stats.an_pagefaults++;
+		write_unlock(&prp_fifo->stats.lock);
+		//DA_DEBUG("this is anonymous page: %lu, pid: %d", address, node->pid);
+	} else {
+		write_lock(&prp_fifo->stats.lock);
+		prp_fifo->stats.pc_pagefaults++;
+		write_unlock(&prp_fifo->stats.lock);
+		//DA_DEBUG("this is pagecache page: %lu, pid: %d", address, node->pid);
+	}
+
 	return ret_execute_delay;
 }
-
-//struct prp_fifo_struct prp_fifo;
 
 void lpl_Init(struct dime_instance_struct *dime_instance) {
 	struct prp_fifo_struct *prp_fifo = to_prp_fifo_struct(dime_instance->prp);
@@ -173,6 +224,7 @@ void lpl_Init(struct dime_instance_struct *dime_instance) {
 
 	prp_fifo->lpl_head = (struct list_head) { &(prp_fifo->lpl_head), &(prp_fifo->lpl_head) };
 	rwlock_init(&(prp_fifo->lock));
+	rwlock_init(&(prp_fifo->stats.lock));
 }
 
 
@@ -212,6 +264,10 @@ int init_module(void) {
 
     ret = register_page_replacement_policy(NULL);
 
+	if(init_dime_prp_config_procfs()<0) {
+		ret = -1;
+	}
+
     DA_EXIT();
     return ret;    // Non-zero return means that the module couldn't be loaded.
 }
@@ -219,6 +275,7 @@ void cleanup_module(void) {
 	int i;
     DA_ENTRY();
 
+	cleanup_dime_prp_config_procfs();
 
     for(i=0 ; i<dime.dime_instances_size ; ++i) {
     	lpl_CleanList(&dime.dime_instances[i]);

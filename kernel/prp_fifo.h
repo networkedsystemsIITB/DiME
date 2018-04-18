@@ -3,11 +3,21 @@
 
 #include "common.h"
 
+struct stats_struct {
+	ulong	pc_pagefaults;
+	ulong	an_pagefaults;
+
+	rwlock_t lock;
+};
+
 struct prp_fifo_struct {
 	struct page_replacement_policy_struct prp;
 
 	struct list_head lpl_head;
 	ulong lpl_count;
+
+	struct stats_struct stats;
+	
 	rwlock_t lock;
 };
 
