@@ -227,6 +227,7 @@ retry_node_search:
 			node_to_evict = prp_lru->free.head.next;
 			list_del_rcu(node_to_evict);
 			prp_lru->free.size--;
+			*list_entry(node_to_evict, struct lpl_node_struct, list_node) = (struct lpl_node_struct) {0};
 		}
 		write_unlock(&prp_lru->free.lock);
 
@@ -578,19 +579,21 @@ retry_node_search:
 		// protect page, so that it will get faulted in future
 		node = list_entry(node_to_evict, struct lpl_node_struct, list_node);
 		if(node->pid <= 0) {
-			DA_ERROR("invalid pid: %d : address:%lu", node->pid, node->address);
-			return ret_execute_delay = 0;
+			//DA_ERROR("invalid pid: %d : address:%lu", node->pid, node->address);
+			//return ret_execute_delay = 0;
 		}
+		else
+		{
+			old_mm = ml_get_mm_struct(node->pid);
+			old_dirty = ml_is_dirty(old_mm, node->address);
+			if(old_dirty) {
+				ret_execute_delay = 1;
+				ml_clear_dirty(old_mm, node->address);
+				// TODO:: instead insert address to flush dirty pages list
+			}
 
-		old_mm = ml_get_mm_struct(node->pid);
-		old_dirty = ml_is_dirty(old_mm, node->address);
-		if(old_dirty) {
-			ret_execute_delay = 1;
-			ml_clear_dirty(old_mm, node->address);
-			// TODO:: instead insert address to flush dirty pages list
+			ml_protect_page(ml_get_mm_struct(node->pid), node->address);
 		}
-
-		ml_protect_page(ml_get_mm_struct(node->pid), node->address);
 	}
 
 
@@ -643,8 +646,8 @@ zone->pages_low = (zone->pages_min * 5) / 4;   // in file mm/page_alloc.c
 pagecache list size: As long as the working set is smaller than half of the file cache, it is completely protected from the page eviction code.
 size of anonymous inactive list = Maybe 30% of anonymous pages on a 1GB system, but 1% of anonymous pages on a 1TB system?
 */
-
-#define MIN_FREE_PAGES 10	// percentage of local memory available in free list
+#define MIN_FREE_PAGES_PERCENT 	10		// percentage of local memory available in free list
+#define MIN_FREE_PAGES 			5000	// min # of local memory available in free list
 
 /*
  *	Returns statistics of moved pages around active/inactive lists.
@@ -671,6 +674,7 @@ struct stats_struct balance_lists(struct lpl *active_list, struct lpl *inactive_
 			iternode = iternode->prev;
 			list_del_rcu(&node->list_node);
 			active_list->size--;
+			*node = (struct lpl_node_struct) {0};
 			list_add_tail_rcu(&node->list_node, &local_free_list);
 			target--;
 			stats.pc_active_to_free_moved++;
@@ -721,6 +725,7 @@ struct stats_struct balance_lists(struct lpl *active_list, struct lpl *inactive_
 			iternode = iternode->prev;
 			list_del_rcu(&node->list_node);
 			inactive_list->size--;
+			*node = (struct lpl_node_struct) {0};
 			list_add_tail_rcu(&node->list_node, &local_free_list);
 			target--;
 			stats.pc_inactive_to_free_moved++;
@@ -792,6 +797,7 @@ int try_to_free_pages(struct dime_instance_struct *dime_instance, struct lpl *pl
 			iternode = iternode->prev;
 			list_del_rcu(&node->list_node);
 			pl->size--;
+			*node = (struct lpl_node_struct) {0};
 			list_add_tail_rcu(&node->list_node, &local_free_list);
 			target--;
 			moved_free++;
@@ -819,6 +825,7 @@ int try_to_free_pages(struct dime_instance_struct *dime_instance, struct lpl *pl
 			pl->size--;
 			target--;
 			ml_protect_page(mm, node->address);
+			*node = (struct lpl_node_struct) {0};
 			list_add_tail_rcu(iternode_free, &local_free_list);
 			moved_free++;
 		}
@@ -851,14 +858,17 @@ int balance_local_page_lists(void) {
 
 	for(i=0 ; i<dime.dime_instances_size ; ++i) {
 		int free_target = 0;
+		int required_free_size = 0;
 		dime_instance = &(dime.dime_instances[i]);
 		prp_lru = to_prp_lru_struct(dime_instance->prp);
-		if(prp_lru->lpl_count < dime_instance->local_npages)
-			//|| prp_lru->free.size >= (MIN_FREE_PAGES * dime_instance->local_npages)/100)
+		//if(prp_lru->lpl_count < dime_instance->local_npages)
+			//|| prp_lru->free.size >= (MIN_FREE_PAGES_PERCENT * dime_instance->local_npages)/100)
 			// no need to evict pages for this dime instance
-			continue;
+		//	continue;
 
-		free_target = (MIN_FREE_PAGES * dime_instance->local_npages)/100 - prp_lru->free.size;
+		required_free_size = (MIN_FREE_PAGES_PERCENT * dime_instance->local_npages)/100;
+		required_free_size = required_free_size < MIN_FREE_PAGES ? required_free_size : MIN_FREE_PAGES;
+		free_target = required_free_size - (prp_lru->free.size + dime_instance->local_npages - prp_lru->lpl_count);
 		if(free_target > 0) {
 			/*int target_pi = prp_lru->inactive_pc.size - (18 * dime_instance->local_npages)/100;
 			int target_pa = prp_lru->active_pc.size   - (27 * dime_instance->local_npages)/100;
@@ -883,25 +893,27 @@ int balance_local_page_lists(void) {
 			try_to_free_pages(dime_instance, &prp_lru->active_pc, target_pa, &prp_lru->free);
 			try_to_free_pages(dime_instance, &prp_lru->active_pc, target_aa, &prp_lru->free);
 			*/
-			free_target = (MIN_FREE_PAGES * dime_instance->local_npages)/100 - prp_lru->free.size;
+
+			free_target = required_free_size - prp_lru->free.size;
 			free_target = free_target > 0 ? try_to_free_pages(dime_instance, &prp_lru->inactive_pc, free_target, &prp_lru->free) : 0;
 			write_lock(&prp_lru->stats.lock);
 			prp_lru->stats.pc_inactive_to_free_moved += free_target;
 			write_unlock(&prp_lru->stats.lock);
 			
-			free_target = (MIN_FREE_PAGES * dime_instance->local_npages)/100 - prp_lru->free.size;
+			free_target = required_free_size - prp_lru->free.size;
 			free_target = free_target > 0 ? try_to_free_pages(dime_instance, &prp_lru->inactive_an, free_target, &prp_lru->free) : 0;
 			write_lock(&prp_lru->stats.lock);
 			prp_lru->stats.an_inactive_to_free_moved += free_target;
 			write_unlock(&prp_lru->stats.lock);
+
 			
-			free_target = (MIN_FREE_PAGES * dime_instance->local_npages)/100 - prp_lru->free.size;
+			free_target = required_free_size - prp_lru->free.size;
 			free_target = free_target > 0 ? try_to_free_pages(dime_instance, &prp_lru->active_pc, free_target, &prp_lru->free) : 0;
 			write_lock(&prp_lru->stats.lock);
 			prp_lru->stats.pc_active_to_free_moved += free_target;
 			write_unlock(&prp_lru->stats.lock);
 			
-			free_target = (MIN_FREE_PAGES * dime_instance->local_npages)/100 - prp_lru->free.size;
+			free_target = required_free_size - prp_lru->free.size;
 			free_target = free_target > 0 ? try_to_free_pages(dime_instance, &prp_lru->active_pc, free_target, &prp_lru->free) : 0;
 			write_lock(&prp_lru->lock);
 			prp_lru->stats.an_active_to_free_moved += free_target;
@@ -945,7 +957,7 @@ static struct task_struct *dime_kswapd;
 static int dime_kswapd_fn(void *unused) {
 	allow_signal(SIGKILL);
 	while (!kthread_should_stop()) {
-		msleep(1);
+		usleep_range(10,20);
 		if (signal_pending(dime_kswapd))
 			break;
 		balance_local_page_lists();
