@@ -152,11 +152,11 @@ static ssize_t procfile_write(struct file *file, const char *buffer, size_t leng
 
 
 int lpl_AddPage(struct dime_instance_struct *dime_instance, struct mm_struct * mm, ulong address) {
+	struct stats_struct local_stats = {0};
 	struct lpl_node_struct *node = NULL;
 	int ret_execute_delay = 1;
 	struct prp_lru_struct *prp_lru = to_prp_lru_struct(dime_instance->prp);
 	struct page *page = NULL;
-	bool counted = false; // is this page fault counted in statestics?
 
 	//DA_ERROR("pagefault for %lu", address);
 	// pages in local memory more than the configured dime instance quota, evict extra pages
@@ -193,7 +193,7 @@ int lpl_AddPage(struct dime_instance_struct *dime_instance, struct mm_struct * m
 	// we can treat this case as infinite local pages, and no need to inject delay on any of the page
 	if (dime_instance->local_npages == 0) {
 		ret_execute_delay = 1;
-		return ret_execute_delay;
+		goto EXIT_ADD_PAGE;
 	} else if (dime_instance->local_npages > prp_lru->lpl_count) {
 		// Since there is still free space locally for remote pages, delay should not be injected
 		ret_execute_delay = 1;
@@ -201,16 +201,13 @@ int lpl_AddPage(struct dime_instance_struct *dime_instance, struct mm_struct * m
 
 		if(!node) {
 			DA_ERROR("unable to allocate memory");
-			return ret_execute_delay;
+			goto EXIT_ADD_PAGE;
 		} else {
 			write_lock(&prp_lru->lock);
 			prp_lru->lpl_count++;
 			write_unlock(&prp_lru->lock);
 
-			write_lock(&prp_lru->stats.lock);
-			prp_lru->stats.free_evict++;
-			write_unlock(&prp_lru->stats.lock);
-			counted = true;
+			local_stats.free_evict++;
 		}
 	} else {
 		struct list_head 	*iternode 					= NULL,
@@ -228,15 +225,9 @@ retry_node_search:
 			list_del_rcu(node_to_evict);
 			prp_lru->free.size--;
 			*list_entry(node_to_evict, struct lpl_node_struct, list_node) = (struct lpl_node_struct) {0};
+			local_stats.free_evict++;
 		}
 		write_unlock(&prp_lru->free.lock);
-
-		if(!counted && node_to_evict) {
-			write_lock(&prp_lru->stats.lock);
-			prp_lru->stats.free_evict++;
-			write_unlock(&prp_lru->stats.lock);
-			counted = true;
-		}
 
 		if(!node_to_evict) {
 			// search from pagecache inactive list
@@ -275,6 +266,7 @@ retry_node_search:
 
 					list_del_rcu(node_to_evict);
 					prp_lru->inactive_pc.size--;
+					local_stats.inactive_pc_evict++;
 
 					//DA_INFO("found a page from inactive pc, %lu, %d", node->address, prp_lru->inactive_pc.size);
 					break;
@@ -290,19 +282,9 @@ retry_node_search:
 				list_del_rcu(h);
 				list_add_tail_rcu(h, &prp_lru->active_pc.head);
 				prp_lru->active_pc.size++;
+				local_stats.pc_inactive_to_active_pf_moved++;
 			}
 			write_unlock(&prp_lru->active_pc.lock);
-
-			write_lock(&prp_lru->stats.lock);
-			prp_lru->stats.pc_inactive_to_active_pf_moved += temp_list_size;
-			write_unlock(&prp_lru->stats.lock);
-		}
-
-		if(!counted && node_to_evict) {
-			write_lock(&prp_lru->stats.lock);
-			prp_lru->stats.inactive_pc_evict++;
-			write_unlock(&prp_lru->stats.lock);
-			counted = true;
 		}
 
 		if(!node_to_evict) {
@@ -343,6 +325,7 @@ retry_node_search:
 					list_del_rcu(node_to_evict);
 
 					prp_lru->inactive_an.size--;
+					local_stats.inactive_an_evict++;
 					//DA_INFO("found a page from inactive an, %lu, %d", node->address, prp_lru->inactive_an.size);
 					break;
 				}
@@ -357,19 +340,9 @@ retry_node_search:
 				list_del_rcu(h);
 				list_add_tail_rcu(h, &prp_lru->active_an.head);
 				prp_lru->active_an.size++;
+				local_stats.an_inactive_to_active_pf_moved++;
 			}
 			write_unlock(&prp_lru->active_an.lock);
-
-			write_lock(&prp_lru->stats.lock);
-			prp_lru->stats.an_inactive_to_active_pf_moved += temp_list_size;
-			write_unlock(&prp_lru->stats.lock);
-		}
-
-		if(!counted && node_to_evict) {
-			write_lock(&prp_lru->stats.lock);
-			prp_lru->stats.inactive_an_evict++;
-			write_unlock(&prp_lru->stats.lock);
-			counted = true;
 		}
 
 		if(!node_to_evict) {
@@ -411,6 +384,7 @@ retry_node_search:
 
 					list_del_rcu(node_to_evict);
 					prp_lru->active_pc.size--;
+					local_stats.active_pc_evict++;
 					//DA_INFO("found a page from active pc, %lu, %d", node->address, prp_lru->active_pc.size);
 					break;
 				}
@@ -420,19 +394,9 @@ retry_node_search:
 				struct list_head *h = temp_list.next;
 				list_del_rcu(h);
 				list_add_tail_rcu(h, &prp_lru->active_pc.head);
+				local_stats.pc_inactive_to_active_pf_moved++;
 			}
 			write_unlock(&prp_lru->active_pc.lock);
-
-			write_lock(&prp_lru->stats.lock);
-			prp_lru->stats.pc_inactive_to_active_pf_moved += temp_list_size;
-			write_unlock(&prp_lru->stats.lock);
-		}
-
-		if(!counted && node_to_evict) {
-			write_lock(&prp_lru->stats.lock);
-			prp_lru->stats.active_pc_evict++;
-			write_unlock(&prp_lru->stats.lock);
-			counted = true;
 		}
 
 		if(!node_to_evict) {
@@ -472,6 +436,7 @@ retry_node_search:
 
 					list_del_rcu(node_to_evict);
 					prp_lru->active_an.size--;
+					local_stats.active_an_evict++;
 					//DA_INFO("found a page from active an, %lu, %d", node->address, prp_lru->active_an.size);
 					break;
 				}
@@ -482,19 +447,9 @@ retry_node_search:
 				struct list_head *h = temp_list.next;
 				list_del_rcu(h);
 				list_add_tail_rcu(h, &prp_lru->active_an.head);
+				local_stats.an_inactive_to_active_pf_moved++;
 			}
 			write_unlock(&prp_lru->active_an.lock);
-
-			write_lock(&prp_lru->stats.lock);
-			prp_lru->stats.an_inactive_to_active_pf_moved += temp_list_size;
-			write_unlock(&prp_lru->stats.lock);
-		}
-
-		if(!counted && node_to_evict) {
-			write_lock(&prp_lru->stats.lock);
-			prp_lru->stats.active_an_evict++;
-			write_unlock(&prp_lru->stats.lock);
-			counted = true;
 		}
 
 		if(!node_to_evict) {
@@ -504,16 +459,10 @@ retry_node_search:
 				node_to_evict = prp_lru->inactive_pc.head.next;
 				list_del_rcu(node_to_evict);
 				prp_lru->inactive_pc.size--;
+				local_stats.force_inactive_pc_evict++;
 				DA_WARNING("could not find a page to evict, selecting first page from inactive pagecache");
 			}
 			write_unlock(&prp_lru->inactive_pc.lock);
-
-			if(!counted && node_to_evict) {
-				write_lock(&prp_lru->stats.lock);
-				prp_lru->stats.force_inactive_pc_evict++;
-				write_unlock(&prp_lru->stats.lock);
-				counted = true;
-			}
 			
 			if(!node_to_evict) {
 				write_lock(&prp_lru->inactive_an.lock);
@@ -521,16 +470,10 @@ retry_node_search:
 					node_to_evict = prp_lru->inactive_an.head.next;
 					list_del_rcu(node_to_evict);
 					prp_lru->inactive_an.size--;
+					local_stats.force_inactive_an_evict++;
 					DA_WARNING("could not find a page to evict, selecting first page from inactive anon");
 				}
 				write_unlock(&prp_lru->inactive_an.lock);
-			}
-
-			if(!counted && node_to_evict) {
-				write_lock(&prp_lru->stats.lock);
-				prp_lru->stats.force_inactive_an_evict++;
-				write_unlock(&prp_lru->stats.lock);
-				counted = true;
 			}
 			
 			if(!node_to_evict) {
@@ -539,35 +482,23 @@ retry_node_search:
 					node_to_evict = prp_lru->active_pc.head.next;
 					list_del_rcu(node_to_evict);
 					prp_lru->active_pc.size--;
+					local_stats.force_active_pc_evict++;
 					DA_WARNING("could not find a page to evict, selecting first page from active pagecache");
 				}
 				write_unlock(&prp_lru->active_pc.lock);
 
 			}
 
-			if(!counted && node_to_evict) {
-				write_lock(&prp_lru->stats.lock);
-				prp_lru->stats.force_active_pc_evict++;
-				write_unlock(&prp_lru->stats.lock);
-				counted = true;
-			}
-			
 			if(!node_to_evict) {
 				write_lock(&prp_lru->active_an.lock);
 				if(!list_empty(&prp_lru->active_an.head)) {
 					node_to_evict = prp_lru->active_an.head.next;
 					list_del_rcu(node_to_evict);
 					prp_lru->active_an.size--;
+					local_stats.force_active_an_evict++;
 					DA_WARNING("could not find a page to evict, selecting first page from active anon");
 				}
 				write_unlock(&prp_lru->active_an.lock);
-			}
-
-			if(!counted && node_to_evict) {
-				write_lock(&prp_lru->stats.lock);
-				prp_lru->stats.force_active_an_evict++;
-				write_unlock(&prp_lru->stats.lock);
-				counted = true;
 			}
 			
 			if(!node_to_evict) {
@@ -613,9 +544,7 @@ retry_node_search:
 		prp_lru->active_an.size++;
 		write_unlock(&prp_lru->active_an.lock);
 
-		write_lock(&prp_lru->stats.lock);
-		prp_lru->stats.an_pagefaults++;
-		write_unlock(&prp_lru->stats.lock);
+		local_stats.an_pagefaults++;
 		//DA_DEBUG("this is anonymous page: %lu, pid: %d", address, node->pid);
 	} else {
 		write_lock(&prp_lru->active_pc.lock);
@@ -623,13 +552,37 @@ retry_node_search:
 		prp_lru->active_pc.size++;
 		write_unlock(&prp_lru->active_pc.lock);
 
-		write_lock(&prp_lru->stats.lock);
-		prp_lru->stats.pc_pagefaults++;
-		write_unlock(&prp_lru->stats.lock);
+		local_stats.pc_pagefaults++;
 		//DA_DEBUG("this is pagecache page: %lu, pid: %d", address, node->pid);
 	}
 	if(current->pid <= 0)
 		DA_ERROR("invalid pid: %d : address: %lu", current->pid, address);
+
+
+EXIT_ADD_PAGE:
+	write_lock(&prp_lru->stats.lock);
+	prp_lru->stats.pc_pagefaults 					+= local_stats.pc_pagefaults;
+	prp_lru->stats.an_pagefaults 					+= local_stats.an_pagefaults;
+	prp_lru->stats.free_evict 						+= local_stats.free_evict;
+	prp_lru->stats.active_pc_evict 					+= local_stats.active_pc_evict;
+	prp_lru->stats.inactive_pc_evict 				+= local_stats.inactive_pc_evict;
+	prp_lru->stats.active_an_evict 					+= local_stats.active_an_evict;
+	prp_lru->stats.inactive_an_evict 				+= local_stats.inactive_an_evict;
+	prp_lru->stats.force_active_pc_evict 			+= local_stats.force_active_pc_evict;
+	prp_lru->stats.force_inactive_pc_evict 			+= local_stats.force_inactive_pc_evict;
+	prp_lru->stats.force_active_an_evict 			+= local_stats.force_active_an_evict;
+	prp_lru->stats.force_inactive_an_evict 			+= local_stats.force_inactive_an_evict;
+	prp_lru->stats.pc_active_to_free_moved 			+= local_stats.pc_active_to_free_moved;
+	prp_lru->stats.pc_inactive_to_free_moved 		+= local_stats.pc_inactive_to_free_moved;
+	prp_lru->stats.an_active_to_free_moved 			+= local_stats.an_active_to_free_moved;
+	prp_lru->stats.an_inactive_to_free_moved 		+= local_stats.an_inactive_to_free_moved;
+	prp_lru->stats.pc_active_to_inactive_moved 		+= local_stats.pc_active_to_inactive_moved;
+	prp_lru->stats.pc_inactive_to_active_moved 		+= local_stats.pc_inactive_to_active_moved;
+	prp_lru->stats.an_active_to_inactive_moved 		+= local_stats.an_active_to_inactive_moved;
+	prp_lru->stats.an_inactive_to_active_moved 		+= local_stats.an_inactive_to_active_moved;
+	prp_lru->stats.pc_inactive_to_active_pf_moved 	+= local_stats.pc_inactive_to_active_pf_moved;
+	prp_lru->stats.an_inactive_to_active_pf_moved 	+= local_stats.an_inactive_to_active_pf_moved;
+	write_unlock(&prp_lru->stats.lock);
 
 	return ret_execute_delay;
 }
