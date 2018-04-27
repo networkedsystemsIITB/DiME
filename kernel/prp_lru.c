@@ -151,12 +151,17 @@ static ssize_t procfile_write(struct file *file, const char *buffer, size_t leng
 
 
 
-int lpl_AddPage(struct dime_instance_struct *dime_instance, struct mm_struct * mm, ulong address) {
+int add_page(struct dime_instance_struct *dime_instance, struct pid * pid_s, ulong address) {
+	struct task_struct *c_ts = pid_task(pid_s, PIDTYPE_PID);
+	struct mm_struct * mm = c_ts->mm;
 	struct stats_struct local_stats = {0};
 	struct lpl_node_struct *node = NULL;
 	int ret_execute_delay = 1;
 	struct prp_lru_struct *prp_lru = to_prp_lru_struct(dime_instance->prp);
 	struct page *page = NULL;
+
+
+	//address = address - address%PAGE_SIZE; // start address of a page that this address belongs
 
 	//DA_ERROR("pagefault for %lu", address);
 	// pages in local memory more than the configured dime instance quota, evict extra pages
@@ -523,7 +528,7 @@ retry_node_search:
 				// TODO:: instead insert address to flush dirty pages list
 			}
 
-			ml_protect_page(ml_get_mm_struct(node->pid), node->address);
+			ml_protect_page(old_mm, node->address);
 		}
 	}
 
@@ -989,7 +994,7 @@ int init_module(void) {
 		prp_lru->stats = (struct stats_struct) {0};
 		rwlock_init(&(prp_lru->stats.lock));
 
-		prp_lru->prp.add_page = lpl_AddPage;
+		prp_lru->prp.add_page = add_page;
 		prp_lru->prp.clean = lpl_CleanList;
 
 

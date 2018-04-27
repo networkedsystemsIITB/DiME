@@ -237,7 +237,7 @@ int do_page_fault_hook_end_new (struct pt_regs *regs,
     if(address != 0ul && dime_instance) {
         // Inject delays here
 
-        if(dime_instance->prp && dime_instance->prp->add_page && dime_instance->prp->add_page(dime_instance, current->mm, address) == 1) {
+        if(dime_instance->prp && dime_instance->prp->add_page && dime_instance->prp->add_page(dime_instance, task_pid(current), address) == 1) {
             write_lock(&dime_instance->lock);
             dime_instance->page_fault_count++;
             write_unlock(&dime_instance->lock);

@@ -13,7 +13,7 @@
 struct dime_instance_struct;
 
 struct page_replacement_policy_struct {
-	int		(*add_page)		(struct dime_instance_struct *dime_instance, struct mm_struct * mm, ulong address);
+	int		(*add_page)		(struct dime_instance_struct *dime_instance, struct pid * pid_s, ulong address);
 	void	(*clean)		(struct dime_instance_struct *dime_instance);
 };
 
@@ -40,6 +40,11 @@ struct lpl_node_struct {
 	
 	ulong address;
 	pid_t pid;
+
+	struct pid *pid_s;
+	pte_t *ptep;
+	struct page *page;
+	struct task_struct *ts;
 };
 
 // local page list struct
