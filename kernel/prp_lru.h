@@ -4,6 +4,7 @@
 #include "common.h"
 
 struct stats_struct {
+	// TODO:: use atomic_t type for atomic increment, Ref:https://www.kernel.org/doc/html/v4.12/core-api/atomic_ops.html
 	// # of pagefaults handled in different cases
 	ulong	free_evict;
 	ulong	active_pc_evict;

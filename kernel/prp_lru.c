@@ -16,6 +16,7 @@
 #include <linux/kthread.h>
 #include <linux/proc_fs.h>
 #include <asm/uaccess.h>
+#include <asm/pgtable_types.h>
 
 #include "da_mem_lib.h"
 
@@ -147,26 +148,133 @@ static ssize_t procfile_write(struct file *file, const char *buffer, size_t leng
 
 
 
+struct lpl_node_struct * evict_first_page(struct lpl *from_list) {
+	struct lpl_node_struct * node_to_evict = NULL;
+
+	write_lock(&from_list->lock);
+	
+	node_to_evict = list_first_entry_or_null(&from_list->head, struct lpl_node_struct, list_node);
+	
+	if(node_to_evict) {
+		struct task_struct		* i_ts		= NULL;
+		struct mm_struct		* i_mm		= NULL;
+		pte_t					* i_ptep	= NULL;
+
+		// remove node from list
+		list_del_rcu(&node_to_evict->list_node);
+		from_list->size--;
+
+		write_unlock(&from_list->lock);
+
+		// get pte pointer
+		i_ts	= pid_task(node_to_evict->pid_s, PIDTYPE_PID);
+		i_mm	= (i_ts == NULL ? NULL : i_ts->mm);
+		i_ptep	= (i_mm == NULL ? NULL : ml_get_ptep(i_mm, node_to_evict->address));
+
+		// protect page
+		ml_protect_pte(i_mm, node_to_evict->address, i_ptep);
+	} else {
+		write_unlock(&from_list->lock);
+	}
+
+	return node_to_evict;
+}
 
 
+struct lpl_node_struct * evict_single_page(struct lpl *from_list, struct lpl *active_list, int * from_to_active_moved) {
+	struct lpl_node_struct * node_to_evict = NULL;
+	struct lpl tmp_list =	{
+								.head = LIST_HEAD_INIT(tmp_list.head),
+								.size = 0
+							};
+	struct list_head *iternode;
+
+	write_lock(&from_list->lock);
+	for(iternode = from_list->head.next ; iternode != &from_list->head ; iternode = iternode->next) {
+		struct lpl_node_struct	* i_node	= NULL;
+		struct task_struct		* i_ts		= NULL;
+		struct mm_struct		* i_mm		= NULL;
+		pte_t					* i_ptep	= NULL;
+		int accessed, dirty;
 
 
-int add_page(struct dime_instance_struct *dime_instance, struct pid * pid_s, ulong address) {
-	struct task_struct *c_ts = pid_task(pid_s, PIDTYPE_PID);
-	struct mm_struct * mm = c_ts->mm;
-	struct stats_struct local_stats = {0};
-	struct lpl_node_struct *node = NULL;
-	int ret_execute_delay = 1;
-	struct prp_lru_struct *prp_lru = to_prp_lru_struct(dime_instance->prp);
-	struct page *page = NULL;
+		i_node = list_entry(iternode, struct lpl_node_struct, list_node);
+
+		//if(c_pid == i_pid && c_addr == node->address)
+			// if faulting page is same as the one we want to evict, continue,
+			// since it is going to get protected and will recursively called
+			// LESS likely happen
+		//	continue;
+
+		// remove iter node from list
+		iternode = iternode->prev;
+		list_del_rcu(&(i_node->list_node));
+		from_list->size--;
+
+		i_ts	= pid_task(i_node->pid_s, PIDTYPE_PID);
+		i_mm	= (i_ts == NULL ? NULL : i_ts->mm);
+		i_ptep	= (i_mm == NULL ? NULL : ml_get_ptep(i_mm, i_node->address));
+		if(!i_ptep) {
+			node_to_evict = i_node;
+			break;
+		}
+
+		accessed = pte_young(*i_ptep);
+		dirty = pte_dirty(*i_ptep);
+		// TODO:: what to do with dirty page?
+
+		if(accessed) {
+			list_add_tail_rcu(&(i_node->list_node), &tmp_list.head);
+			tmp_list.size++;
+		} else {
+			node_to_evict = i_node;
+			ml_protect_pte(i_mm, i_node->address, i_ptep);
+			break;
+		}
+	}
+
+	// reposition list head to this point, so that next time we wont scan again previously scanned nodes
+	//	NO NEED TO REPOSITION HEAD, since it always will be pointing to latest
+	//if(node_to_evict && iternode != &from_list->head) {
+	//	list_del_rcu(&from_list->head);
+	//	list_add_rcu(&from_list->head, iternode);
+	//}
+	write_unlock(&from_list->lock);
 
 
-	//address = address - address%PAGE_SIZE; // start address of a page that this address belongs
+	// append all temp list nodes to active list
+	write_lock(&active_list->lock);
+	while(!list_empty(&tmp_list.head)) {
+		struct list_head *h = tmp_list.head.next;
+		list_del_rcu(h);
+		list_add_tail_rcu(h, &active_list->head);
+		active_list->size++;
+		(*from_to_active_moved)++;
+	}
+	write_unlock(&active_list->lock);
 
-	//DA_ERROR("pagefault for %lu", address);
+	return node_to_evict;
+}
+
+
+int add_page(struct dime_instance_struct *dime_instance, struct pid * c_pid, ulong c_addr) {
+	struct task_struct		* c_ts				= pid_task(c_pid, PIDTYPE_PID);
+	struct mm_struct		* c_mm				= (c_ts == NULL ? NULL : c_ts->mm);
+	pte_t					* c_ptep			= (c_mm == NULL ? NULL : ml_get_ptep(c_mm, c_addr));
+	struct page				* c_page			= (c_ptep == NULL ? NULL : pte_page(*c_ptep));
+
+	struct lpl_node_struct	* node_to_evict		= NULL;
+	struct prp_lru_struct	* prp_lru			= to_prp_lru_struct(dime_instance->prp);
+	struct stats_struct 	local_stats			= {0};
+	int 					ret_execute_delay	= 1;
+
+
+	//c_addr = c_addr - c_addr%PAGE_SIZE; // start address of a page that this address belongs
+
 	// pages in local memory more than the configured dime instance quota, evict extra pages
 	// possible when instance configuration is changed dynamically using proc file /proc/dime_config
 	if(dime_instance->local_npages < prp_lru->lpl_count) {
+		struct lpl_node_struct * node = NULL;
 		// TODO:: not required till dynamic changes, need to apply locks
 		write_lock(&prp_lru->lock);
 		while (dime_instance->local_npages < prp_lru->lpl_count) {
@@ -194,17 +302,17 @@ int add_page(struct dime_instance_struct *dime_instance, struct pid * pid_s, ulo
 		write_unlock(&prp_lru->lock);
 	}
 
-	// no need to add this address
-	// we can treat this case as infinite local pages, and no need to inject delay on any of the page
 	if (dime_instance->local_npages == 0) {
+		// no need to add this address
+		// we can treat this case as infinite local pages, and no need to inject delay on any of the page
 		ret_execute_delay = 1;
 		goto EXIT_ADD_PAGE;
 	} else if (dime_instance->local_npages > prp_lru->lpl_count) {
 		// Since there is still free space locally for remote pages, delay should not be injected
 		ret_execute_delay = 1;
-		node = (struct lpl_node_struct*) kmalloc(sizeof(struct lpl_node_struct), GFP_KERNEL);
+		node_to_evict = (struct lpl_node_struct*) kmalloc(sizeof(struct lpl_node_struct), GFP_KERNEL);
 
-		if(!node) {
+		if(!node_to_evict) {
 			DA_ERROR("unable to allocate memory");
 			goto EXIT_ADD_PAGE;
 		} else {
@@ -215,353 +323,122 @@ int add_page(struct dime_instance_struct *dime_instance, struct pid * pid_s, ulo
 			local_stats.free_evict++;
 		}
 	} else {
-		struct list_head 	*iternode 					= NULL,
-							*node_to_evict 				= NULL;
-		//int old_accessed;
-		int old_dirty;
-		struct mm_struct * old_mm;
+		while(node_to_evict == NULL) {
+			int from_to_active_moved = 0;
 
-retry_node_search:
+			// TODO:: stats lock use
 
-		// search in free list
-		write_lock(&prp_lru->free.lock);
-		if(! list_empty(&prp_lru->free.head)) {
-			node_to_evict = prp_lru->free.head.next;
-			list_del_rcu(node_to_evict);
-			prp_lru->free.size--;
-			*list_entry(node_to_evict, struct lpl_node_struct, list_node) = (struct lpl_node_struct) {0};
-			local_stats.free_evict++;
-		}
-		write_unlock(&prp_lru->free.lock);
+			// search in free list
+			write_lock(&prp_lru->free.lock);
+			node_to_evict = list_first_entry_or_null(&prp_lru->free.head, struct lpl_node_struct, list_node);
+			if(node_to_evict) {
+				list_del_rcu(&node_to_evict->list_node);
+				prp_lru->free.size--;
+				*node_to_evict = (struct lpl_node_struct) {0};
+				local_stats.free_evict++;
+				write_unlock(&prp_lru->free.lock);
+				goto FREE_NODE_FOUND;
+			} else {
+				write_unlock(&prp_lru->free.lock);
+			}
 
-		if(!node_to_evict) {
 			// search from pagecache inactive list
-			// TODO:: decide based on some criterion whether to evict pages from this list
-			struct list_head temp_list = LIST_HEAD_INIT(temp_list);
-			ulong temp_list_size = 0;
-
-			write_lock(&prp_lru->inactive_pc.lock);
-			for(iternode = prp_lru->inactive_pc.head.next ; iternode != &prp_lru->inactive_pc.head ; iternode = iternode->next) {
-				struct mm_struct *mm;
-				int accessed, dirty;
-
-				node = list_entry(iternode, struct lpl_node_struct, list_node);
-				if(current->pid == node->pid && address == node->address)
-					// if faulting page is same as the one we want to evict, continue,
-					// since it is going to get protected and will recursively called
-					continue;
-
-				mm = ml_get_mm_struct(node->pid);
-				accessed = ml_is_accessed(mm, node->address);
-				dirty = ml_is_dirty(mm, node->address);
-
-				if(accessed) {
-					iternode = iternode->prev;
-					list_del_rcu(&(node->list_node));
-					prp_lru->inactive_pc.size--;
-					//ml_clear_accessed(mm, node->address);
-					list_add_tail_rcu(&(node->list_node), &temp_list);
-					temp_list_size++;
-				} else {
-					node_to_evict = iternode;
-
-					// reposition list head to this point, so that next time we wont scan again previously scanned nodes
-					list_del_rcu(&prp_lru->inactive_pc.head);
-					list_add_rcu(&prp_lru->inactive_pc.head, node_to_evict);
-
-					list_del_rcu(node_to_evict);
-					prp_lru->inactive_pc.size--;
-					local_stats.inactive_pc_evict++;
-
-					//DA_INFO("found a page from inactive pc, %lu, %d", node->address, prp_lru->inactive_pc.size);
-					break;
-				}
-
+			from_to_active_moved = 0;
+			node_to_evict = evict_single_page(&prp_lru->inactive_pc, &prp_lru->active_pc, &from_to_active_moved);
+			if(node_to_evict) {
+				local_stats.inactive_pc_evict++;
+				goto FREE_NODE_FOUND;
 			}
-			write_unlock(&prp_lru->inactive_pc.lock);
 
-
-			write_lock(&prp_lru->active_pc.lock);
-			while(!list_empty(&temp_list)) {
-				struct list_head *h = temp_list.next;
-				list_del_rcu(h);
-				list_add_tail_rcu(h, &prp_lru->active_pc.head);
-				prp_lru->active_pc.size++;
-				local_stats.pc_inactive_to_active_pf_moved++;
-			}
-			write_unlock(&prp_lru->active_pc.lock);
-		}
-
-		if(!node_to_evict) {
 			// search from anon inactive list
-			// TODO:: decide based on some criterion whether to evict pages from this list
-			struct list_head temp_list = LIST_HEAD_INIT(temp_list);
-			ulong temp_list_size = 0;
-
-			write_lock(&prp_lru->inactive_an.lock);
-			for(iternode = prp_lru->inactive_an.head.next ; iternode != &prp_lru->inactive_an.head ; iternode = iternode->next) {
-				struct mm_struct *mm;
-				int accessed, dirty;
-
-				node = list_entry(iternode, struct lpl_node_struct, list_node);
-				if(current->pid == node->pid && address == node->address)
-					// if faulting page is same as the one we want to evict, continue,
-					// since it is going to get protected and will recursively called
-					continue;
-
-				mm = ml_get_mm_struct(node->pid);
-				accessed = ml_is_accessed(mm, node->address);
-				dirty = ml_is_dirty(mm, node->address);
-
-				if(accessed) {
-					iternode = iternode->prev;
-					list_del_rcu(&(node->list_node));
-					prp_lru->inactive_an.size--;
-					//ml_clear_accessed(mm, node->address);
-					list_add_tail_rcu(&(node->list_node), &temp_list);
-					temp_list_size++;
-				} else {
-					node_to_evict = iternode;
-
-					// reposition list head to this point, so that next time we wont scan again previously scanned nodes
-					list_del_rcu(&prp_lru->inactive_an.head);
-					list_add_rcu(&prp_lru->inactive_an.head, node_to_evict);
-
-					list_del_rcu(node_to_evict);
-
-					prp_lru->inactive_an.size--;
-					local_stats.inactive_an_evict++;
-					//DA_INFO("found a page from inactive an, %lu, %d", node->address, prp_lru->inactive_an.size);
-					break;
-				}
-
+			from_to_active_moved = 0;
+			node_to_evict = evict_single_page(&prp_lru->inactive_an, &prp_lru->active_an, &from_to_active_moved);
+			local_stats.an_inactive_to_active_pf_moved += from_to_active_moved;
+			if(node_to_evict) {
+				local_stats.inactive_an_evict++;
+				goto FREE_NODE_FOUND;
 			}
-			write_unlock(&prp_lru->inactive_an.lock);
 
-
-			write_lock(&prp_lru->active_an.lock);
-			while(!list_empty(&temp_list)) {
-				struct list_head *h = temp_list.next;
-				list_del_rcu(h);
-				list_add_tail_rcu(h, &prp_lru->active_an.head);
-				prp_lru->active_an.size++;
-				local_stats.an_inactive_to_active_pf_moved++;
-			}
-			write_unlock(&prp_lru->active_an.lock);
-		}
-
-		if(!node_to_evict) {
 			// search from pagecache active list
-			// TODO:: decide based on some criterion whether to evict pages from this list
-			struct list_head temp_list = LIST_HEAD_INIT(temp_list);
-			ulong temp_list_size = 0;
-
-			write_lock(&prp_lru->active_pc.lock);
-			for(iternode = prp_lru->active_pc.head.next ; iternode != &prp_lru->active_pc.head ; iternode = iternode->next) {
-				struct mm_struct *mm;
-				int accessed, dirty;
-
-				node = list_entry(iternode, struct lpl_node_struct, list_node);
-				if(current->pid == node->pid && address == node->address)
-					// if faulting page is same as the one we want to evict, continue,
-					// since it is going to get protected and will recursively called
-					continue;
-
-				mm = ml_get_mm_struct(node->pid);
-				accessed = ml_is_accessed(mm, node->address);
-				dirty = ml_is_dirty(mm, node->address);
-
-				if(accessed) {// || dirty) {
-					iternode = iternode->prev;
-					list_del_rcu(&(node->list_node));
-					//ml_clear_accessed(mm, node->address);
-					//ml_clear_dirty(mm, node->address);		// TODO:: create new list of dirty pages, kswapd will flush these pages
-					//list_add_tail_rcu(&(node->list_node), &prp_lru->active_pc.head);
-					list_add_tail_rcu(&(node->list_node), &temp_list);
-					temp_list_size++;
-					//DA_INFO("not selecting this page since accessed or dirty active pc, %lu, %d", node->address, prp_lru->active_pc.size);
-				} else {
-					node_to_evict = iternode;
-
-					// reposition list head to this point, so that next time we wont scan again previously scanned nodes
-					list_del_rcu(&prp_lru->active_pc.head);
-					list_add_rcu(&prp_lru->active_pc.head, node_to_evict);
-
-					list_del_rcu(node_to_evict);
-					prp_lru->active_pc.size--;
-					local_stats.active_pc_evict++;
-					//DA_INFO("found a page from active pc, %lu, %d", node->address, prp_lru->active_pc.size);
-					break;
-				}
+			from_to_active_moved = 0;
+			node_to_evict = evict_single_page(&prp_lru->active_pc, &prp_lru->active_pc, &from_to_active_moved);
+			local_stats.pc_inactive_to_active_pf_moved += from_to_active_moved;
+			if(node_to_evict) {
+				local_stats.active_pc_evict++;
+				goto FREE_NODE_FOUND;
 			}
 
-			while(!list_empty(&temp_list)) {
-				struct list_head *h = temp_list.next;
-				list_del_rcu(h);
-				list_add_tail_rcu(h, &prp_lru->active_pc.head);
-				local_stats.pc_inactive_to_active_pf_moved++;
-			}
-			write_unlock(&prp_lru->active_pc.lock);
-		}
-
-		if(!node_to_evict) {
 			// search from anon active list
-			// TODO:: decide based on some criterion whether to evict pages from this list
-			struct list_head temp_list = LIST_HEAD_INIT(temp_list);
-			ulong temp_list_size = 0;
-
-			write_lock(&prp_lru->active_an.lock);
-			for(iternode = prp_lru->active_an.head.next ; iternode != &prp_lru->active_an.head ; iternode = iternode->next) {
-				struct mm_struct *mm;
-				int accessed, dirty;
-
-				node = list_entry(iternode, struct lpl_node_struct, list_node);
-				if(current->pid == node->pid && address == node->address)
-					// if faulting page is same as the one we want to evict, continue,
-					// since it is going to get protected and will recursively called
-					continue;
-
-				mm = ml_get_mm_struct(node->pid);
-				accessed = ml_is_accessed(mm, node->address);
-				dirty = ml_is_dirty(mm, node->address);
-
-				if(accessed) {// || dirty) {
-					iternode = iternode->prev;
-					list_del_rcu(&(node->list_node));
-					//ml_clear_accessed(mm, node->address);
-					//ml_clear_dirty(mm, node->address);		// TODO:: create new list of dirty pages, kswapd will flush these pages
-					list_add_tail_rcu(&(node->list_node), &temp_list);
-					temp_list_size++;
-				} else {
-					node_to_evict = iternode;
-
-					// reposition list head to this point, so that next time we wont scan again previously scanned nodes
-					list_del_rcu(&prp_lru->active_an.head);
-					list_add_rcu(&prp_lru->active_an.head, node_to_evict);
-
-					list_del_rcu(node_to_evict);
-					prp_lru->active_an.size--;
-					local_stats.active_an_evict++;
-					//DA_INFO("found a page from active an, %lu, %d", node->address, prp_lru->active_an.size);
-					break;
-				}
-
+			from_to_active_moved = 0;
+			node_to_evict = evict_single_page(&prp_lru->active_an, &prp_lru->active_an, &from_to_active_moved);
+			local_stats.an_inactive_to_active_pf_moved += from_to_active_moved;
+			if(node_to_evict) {
+				local_stats.active_an_evict++;
+				goto FREE_NODE_FOUND;
 			}
 
-			while(!list_empty(&temp_list)) {
-				struct list_head *h = temp_list.next;
-				list_del_rcu(h);
-				list_add_tail_rcu(h, &prp_lru->active_an.head);
-				local_stats.an_inactive_to_active_pf_moved++;
-			}
-			write_unlock(&prp_lru->active_an.lock);
-		}
-
-		if(!node_to_evict) {
-			// forcefully select any page
-			write_lock(&prp_lru->inactive_pc.lock);
-			if(!list_empty(&prp_lru->inactive_pc.head)) {
-				node_to_evict = prp_lru->inactive_pc.head.next;
-				list_del_rcu(node_to_evict);
-				prp_lru->inactive_pc.size--;
+			// forcefully select from pagecache inactive list
+			node_to_evict = evict_first_page(&prp_lru->inactive_pc);
+			if(node_to_evict) {
 				local_stats.force_inactive_pc_evict++;
-				DA_WARNING("could not find a page to evict, selecting first page from inactive pagecache");
+				goto FREE_NODE_FOUND;
 			}
-			write_unlock(&prp_lru->inactive_pc.lock);
-			
-			if(!node_to_evict) {
-				write_lock(&prp_lru->inactive_an.lock);
-				if(!list_empty(&prp_lru->inactive_an.head)) {
-					node_to_evict = prp_lru->inactive_an.head.next;
-					list_del_rcu(node_to_evict);
-					prp_lru->inactive_an.size--;
-					local_stats.force_inactive_an_evict++;
-					DA_WARNING("could not find a page to evict, selecting first page from inactive anon");
-				}
-				write_unlock(&prp_lru->inactive_an.lock);
+
+			// forcefully select from anon inactive list
+			node_to_evict = evict_first_page(&prp_lru->inactive_an);
+			if(node_to_evict) {
+				local_stats.force_inactive_an_evict++;
+				goto FREE_NODE_FOUND;
 			}
 			
-			if(!node_to_evict) {
-				write_lock(&prp_lru->active_pc.lock);
-				if(!list_empty(&prp_lru->active_pc.head)) {
-					node_to_evict = prp_lru->active_pc.head.next;
-					list_del_rcu(node_to_evict);
-					prp_lru->active_pc.size--;
-					local_stats.force_active_pc_evict++;
-					DA_WARNING("could not find a page to evict, selecting first page from active pagecache");
-				}
-				write_unlock(&prp_lru->active_pc.lock);
-
+			// forcefully select from pagecache active list
+			node_to_evict = evict_first_page(&prp_lru->active_pc);
+			if(node_to_evict) {
+				local_stats.force_active_pc_evict++;
+				goto FREE_NODE_FOUND;
 			}
 
-			if(!node_to_evict) {
-				write_lock(&prp_lru->active_an.lock);
-				if(!list_empty(&prp_lru->active_an.head)) {
-					node_to_evict = prp_lru->active_an.head.next;
-					list_del_rcu(node_to_evict);
-					prp_lru->active_an.size--;
-					local_stats.force_active_an_evict++;
-					DA_WARNING("could not find a page to evict, selecting first page from active anon");
-				}
-				write_unlock(&prp_lru->active_an.lock);
+			// forcefully select from anon active list
+			node_to_evict = evict_first_page(&prp_lru->active_an);
+			if(node_to_evict) {
+				local_stats.force_active_an_evict++;
+				goto FREE_NODE_FOUND;
 			}
 			
-			if(!node_to_evict) {
-				DA_WARNING("retrying to evict a page");
-				goto retry_node_search;
-			}
-		}
-
-		// protect page, so that it will get faulted in future
-		node = list_entry(node_to_evict, struct lpl_node_struct, list_node);
-		if(node->pid <= 0) {
-			//DA_ERROR("invalid pid: %d : address:%lu", node->pid, node->address);
-			//return ret_execute_delay = 0;
-		}
-		else
-		{
-			old_mm = ml_get_mm_struct(node->pid);
-			old_dirty = ml_is_dirty(old_mm, node->address);
-			if(old_dirty) {
-				ret_execute_delay = 1;
-				ml_clear_dirty(old_mm, node->address);
-				// TODO:: instead insert address to flush dirty pages list
-			}
-
-			ml_protect_page(old_mm, node->address);
+			DA_WARNING("retrying to evict a page");
 		}
 	}
 
 
-	node->address = address;
-	node->pid = current->pid;
-	
-	page = ml_get_page_sruct(mm, address);
+FREE_NODE_FOUND:
+
+	node_to_evict->address = c_addr;
+	node_to_evict->pid_s = c_pid;
+	node_to_evict->pid = c_pid->numbers[0].nr;
 	
 	// Sometimes bulk pagefault requests come and evicting any page from these requests will again trigger pagefault.
 	// This happens recursively if accessed bit is not set for each requested page.
 	// So, set accessed bit to all requested pages
-	ml_set_accessed(mm, address);
+	ml_set_accessed_pte(c_mm, c_addr, c_ptep);
 
-	if( ((unsigned long)(page->mapping) & (unsigned long)0x01) != 0 ) {
+	if( ((unsigned long)(c_page->mapping) & (unsigned long)0x01) != 0 ) {
 		write_lock(&prp_lru->active_an.lock);
-		list_add_tail_rcu(&(node->list_node), &prp_lru->active_an.head);
+		list_add_tail_rcu(&(node_to_evict->list_node), &prp_lru->active_an.head);
 		prp_lru->active_an.size++;
 		write_unlock(&prp_lru->active_an.lock);
 
 		local_stats.an_pagefaults++;
-		//DA_DEBUG("this is anonymous page: %lu, pid: %d", address, node->pid);
 	} else {
 		write_lock(&prp_lru->active_pc.lock);
-		list_add_tail_rcu(&(node->list_node), &prp_lru->active_pc.head);
+		list_add_tail_rcu(&(node_to_evict->list_node), &prp_lru->active_pc.head);
 		prp_lru->active_pc.size++;
 		write_unlock(&prp_lru->active_pc.lock);
 
 		local_stats.pc_pagefaults++;
-		//DA_DEBUG("this is pagecache page: %lu, pid: %d", address, node->pid);
 	}
-	if(current->pid <= 0)
-		DA_ERROR("invalid pid: %d : address: %lu", current->pid, address);
+
+//	if(current->pid <= 0)
+//		DA_ERROR("invalid pid: %d : address: %lu", current->pid, c_addr);
 
 
 EXIT_ADD_PAGE:
