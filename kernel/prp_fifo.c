@@ -126,16 +126,20 @@ static ssize_t procfile_write(struct file *file, const char *buffer, size_t leng
 	return length;
 }
 
-int lpl_AddPage(struct dime_instance_struct *dime_instance, struct mm_struct * mm, ulong address) {
-	struct lpl_node_struct *node = NULL;
+
+int add_page(struct dime_instance_struct *dime_instance, struct pid * c_pid, ulong address) {
+	struct task_struct		* c_ts				= pid_task(c_pid, PIDTYPE_PID);
+	struct mm_struct		* c_mm				= c_ts->mm;
+	struct page				* c_page			= NULL;
+	struct lpl_node_struct	* node_to_replace	= NULL;
+	struct prp_fifo_struct	* prp_fifo			= to_prp_fifo_struct(dime_instance->prp);
 	int ret_execute_delay = 0;
-	struct page *page = NULL;
-	struct prp_fifo_struct *prp_fifo = to_prp_fifo_struct(dime_instance->prp);
-	//struct list_head *lnode = NULL;
 
 	// if local page size is changed dynamically, delete extra nodes from the list
 	while (dime_instance->local_npages < prp_fifo->lpl_count) {
-		struct list_head *first_node;
+		struct list_head * first_node;
+		struct lpl_node_struct * node;
+
 		write_lock(&prp_fifo->lock);
 		first_node = prp_fifo->lpl_head.next;
 		list_del_rcu(first_node);
@@ -144,7 +148,7 @@ int lpl_AddPage(struct dime_instance_struct *dime_instance, struct mm_struct * m
 
 		node = list_entry(first_node, struct lpl_node_struct, list_node);
 
-		ml_protect_page(ml_get_mm_struct(node->pid), node->address);
+		ml_protect_page(ml_get_mm_struct(node->pid_s->numbers[0].nr), node->address);
 		kfree(node);
 		node = NULL;
 		DA_INFO("remove extra local page, current count:%lu", prp_fifo->lpl_count);
@@ -158,9 +162,9 @@ int lpl_AddPage(struct dime_instance_struct *dime_instance, struct mm_struct * m
 	} else if (dime_instance->local_npages > prp_fifo->lpl_count) {
 		// Since there is still free space locally for remote pages, delay should not be injected
 		ret_execute_delay = 1;
-		node = (struct lpl_node_struct*) kmalloc(sizeof(struct lpl_node_struct), GFP_KERNEL);
+		node_to_replace = (struct lpl_node_struct*) kmalloc(sizeof(struct lpl_node_struct), GFP_KERNEL);
 
-		if(!node) {
+		if(!node_to_replace) {
 			DA_ERROR("unable to allocate memory");
 			return ret_execute_delay;
 		} else {
@@ -175,29 +179,27 @@ int lpl_AddPage(struct dime_instance_struct *dime_instance, struct mm_struct * m
 		list_del_rcu(first_node);
 		write_unlock(&prp_fifo->lock);
 		// protect FIFO last address, so that it will be faulted in future
-		node = list_entry(first_node, struct lpl_node_struct, list_node);
-		if(node->pid <= 0)
-			 DA_ERROR("invalid pid: %d : address:%lu", node->pid, node->address);
+		node_to_replace = list_entry(first_node, struct lpl_node_struct, list_node);
+		if(node_to_replace->pid_s->numbers[0].nr <= 0)
+			 DA_ERROR("invalid pid: %d : address:%lu", node_to_replace->pid_s->numbers[0].nr, node_to_replace->address);
 		// ml_reset_inlist(mm, addr);
-		ml_protect_page(ml_get_mm_struct(node->pid), node->address);
+		ml_protect_page(ml_get_mm_struct(node_to_replace->pid_s->numbers[0].nr), node_to_replace->address);
 		// Since local pages are occupied, delay should be injected
 		ret_execute_delay = 1;
 	}
 
-	node->address = address;
-	node->pid = current->pid;
+	*node_to_replace = (struct lpl_node_struct){0};
+	node_to_replace->address = address;
+	node_to_replace->pid_s = c_pid;
+
 	write_lock(&prp_fifo->lock);
-	list_add_tail_rcu(&(node->list_node), &prp_fifo->lpl_head);
+	list_add_tail_rcu(&(node_to_replace->list_node), &prp_fifo->lpl_head);
 	write_unlock(&prp_fifo->lock);
-	if(current->pid <= 0)
-		DA_ERROR("invalid pid: %d : address:%lu", current->pid, address);
-	// ml_set_inlist(mm, address);
-	// ml_unprotect_page(mm, address);		// no page fault for pages in list // might be reason for crash, bad swap entry
 
 
-	page = ml_get_page_sruct(mm, address);
+	c_page = ml_get_page_sruct(c_mm, address);
 	
-	if( ((unsigned long)(page->mapping) & (unsigned long)0x01) != 0 ) {
+	if( ((unsigned long)(c_page->mapping) & (unsigned long)0x01) != 0 ) {
 		write_lock(&prp_fifo->stats.lock);
 		prp_fifo->stats.an_pagefaults++;
 		write_unlock(&prp_fifo->stats.lock);
@@ -216,7 +218,7 @@ void lpl_Init(struct dime_instance_struct *dime_instance) {
 	struct prp_fifo_struct *prp_fifo = to_prp_fifo_struct(dime_instance->prp);
 	*prp_fifo = (struct prp_fifo_struct) {
 		.prp = {
-			.add_page 	= lpl_AddPage,
+			.add_page 	= add_page,
 			.clean 		= lpl_CleanList,
 		},
 		.lpl_count = 0,

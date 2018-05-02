@@ -37,14 +37,8 @@ struct dime_struct {
 
 struct lpl_node_struct {
 	struct list_head list_node;
-	
 	ulong address;
-	pid_t pid;
-
 	struct pid *pid_s;
-	pte_t *ptep;
-	struct page *page;
-	struct task_struct *ts;
 };
 
 // local page list struct
