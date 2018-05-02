@@ -25,6 +25,7 @@ void ml_protect_all_pages(struct mm_struct * mm);
 int ml_unprotect_page(struct mm_struct *mm, ulong address);
 int ml_protect_pte(struct mm_struct *mm, ulong address, pte_t *ptep);
 int ml_protect_page(struct mm_struct *mm, ulong address);
+int ml_clear_accessed_pte(struct mm_struct *mm, ulong address, pte_t* ptep);
 int ml_clear_accessed(struct mm_struct *mm, ulong address);
 int ml_set_accessed_pte(struct mm_struct *mm, ulong address, pte_t* ptep);
 int ml_set_accessed(struct mm_struct *mm, ulong address);

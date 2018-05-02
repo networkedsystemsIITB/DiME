@@ -294,7 +294,7 @@ int add_page(struct dime_instance_struct *dime_instance, struct pid * c_pid, ulo
 
 			node = list_entry(first_node, struct lpl_node_struct, list_node);
 
-			ml_protect_page(ml_get_mm_struct(node->pid), node->address);
+			ml_protect_page(ml_get_mm_struct(node->pid_s->numbers[0].nr), node->address);
 			kfree(node);
 			node = NULL;
 			DA_INFO("remove extra local page, current count:%lu", prp_lru->lpl_count);
@@ -414,11 +414,12 @@ FREE_NODE_FOUND:
 
 	node_to_evict->address = c_addr;
 	node_to_evict->pid_s = c_pid;
-	node_to_evict->pid = c_pid->numbers[0].nr;
+	//node_to_evict->pid = c_pid->numbers[0].nr;
 	
 	// Sometimes bulk pagefault requests come and evicting any page from these requests will again trigger pagefault.
 	// This happens recursively if accessed bit is not set for each requested page.
 	// So, set accessed bit to all requested pages
+	// TODO:: verify requirement of this
 	ml_set_accessed_pte(c_mm, c_addr, c_ptep);
 
 	if( ((unsigned long)(c_page->mapping) & (unsigned long)0x01) != 0 ) {
@@ -489,36 +490,34 @@ size of anonymous inactive list = Maybe 30% of anonymous pages on a 1GB system, 
  *	This function always sets values for pagecache statistic variables, calling function should update correct stats in original prp_struct.
  */
 struct stats_struct balance_lists(struct lpl *active_list, struct lpl *inactive_list, int target, struct lpl *free) {
-	struct stats_struct stats = {0};
-	struct list_head 	*iternode 					= NULL,
-						*iternode_free 				= NULL;
-	struct lpl_node_struct *node = NULL;
-	struct list_head local_free_list = LIST_HEAD_INIT(local_free_list);
-	struct list_head local_inactive_list = LIST_HEAD_INIT(local_inactive_list);
-	struct list_head local_active_list = LIST_HEAD_INIT(local_active_list);
+	struct stats_struct		stats					= {0};
+	struct list_head 		* iternode				= NULL;
+	struct list_head 		local_free_list			= LIST_HEAD_INIT(local_free_list);
+	struct list_head 		local_inactive_list		= LIST_HEAD_INIT(local_inactive_list);
+	struct list_head 		local_active_list		= LIST_HEAD_INIT(local_active_list);
 
 	// move non-accessed pages to inactive list
 	write_lock(&active_list->lock);
 	for(iternode = active_list->head.next ; iternode != &active_list->head && target > 0; iternode = iternode->next) {
-		struct mm_struct *mm;
-		int accessed, dirty;
+		struct lpl_node_struct	* i_node	= list_entry(iternode, struct lpl_node_struct, list_node);
+		struct task_struct		* i_ts		= pid_task(i_node->pid_s, PIDTYPE_PID);
+		struct mm_struct		* i_mm		= (i_ts == NULL ? NULL : i_ts->mm);
+		pte_t					* i_ptep	= (i_mm == NULL ? NULL : ml_get_ptep(i_mm, i_node->address));
 
-		node = list_entry(iternode, struct lpl_node_struct, list_node);
-		mm = ml_get_mm_struct(node->pid);
-		if(!mm) {
+		if(!i_ptep) {
 			iternode = iternode->prev;
-			list_del_rcu(&node->list_node);
+			list_del_rcu(&i_node->list_node);
 			active_list->size--;
-			*node = (struct lpl_node_struct) {0};
-			list_add_tail_rcu(&node->list_node, &local_free_list);
+			*i_node = (struct lpl_node_struct) {0};
+			list_add_tail_rcu(&i_node->list_node, &local_free_list);
 			target--;
 			stats.pc_active_to_free_moved++;
 			continue;
 		}
-		accessed = ml_is_accessed(mm, node->address);
-		dirty = ml_is_dirty(mm, node->address);
 
-		/*if(dirty) {
+		// TODO:: what to do with dirty page?
+
+		/*if(pte_dirty(*i_ptep)) {
 			// emulate page flush, inject delay
 			ulong delay_ns = 0, start_time = sched_clock();
 			delay_ns = ((PAGE_SIZE * 8ULL) * 1000000000ULL) / dime_instance->bandwidth_bps;  // Transmission delay
@@ -528,18 +527,21 @@ struct stats_struct balance_lists(struct lpl *active_list, struct lpl *inactive_
 			}
 			ml_clear_dirty(mm, node->address);
 		}*/
-		if(!accessed) {
-			iternode_free = iternode;
+
+		// if page was not accessed
+		if(!pte_young(*i_ptep)) {
 			iternode = iternode->prev;
-			list_del_rcu(iternode_free);
+			list_del_rcu(&i_node->list_node);
 			active_list->size--;
 			target--;
-			list_add_tail_rcu(iternode_free, &local_inactive_list);
+			list_add_tail_rcu(&i_node->list_node, &local_inactive_list);
 			stats.pc_active_to_inactive_moved++;
+		} else {
+			// clear accessed bit
+			*i_ptep = pte_mkold(*i_ptep);
 		}
-
-		ml_clear_accessed(mm, node->address);
 	}
+
 	// reposition list head to this point, so that next time we wont scan again previously scanned nodes
 	if(iternode != &active_list->head) {
 		list_del_rcu(&active_list->head);
@@ -551,33 +553,31 @@ struct stats_struct balance_lists(struct lpl *active_list, struct lpl *inactive_
 	// move accessed pages to active list
 	write_lock(&inactive_list->lock);
 	for(iternode = inactive_list->head.next ; iternode != &inactive_list->head; iternode = iternode->next) {
-		struct mm_struct *mm;
-		int accessed;
+		struct lpl_node_struct	* i_node	= list_entry(iternode, struct lpl_node_struct, list_node);
+		struct task_struct		* i_ts		= pid_task(i_node->pid_s, PIDTYPE_PID);
+		struct mm_struct		* i_mm		= (i_ts == NULL ? NULL : i_ts->mm);
+		pte_t					* i_ptep	= (i_mm == NULL ? NULL : ml_get_ptep(i_mm, i_node->address));
 
-		node = list_entry(iternode, struct lpl_node_struct, list_node);
-		mm = ml_get_mm_struct(node->pid);
-		if(!mm) {
+		if(!i_ptep) {
 			iternode = iternode->prev;
-			list_del_rcu(&node->list_node);
+			list_del_rcu(&i_node->list_node);
 			inactive_list->size--;
-			*node = (struct lpl_node_struct) {0};
-			list_add_tail_rcu(&node->list_node, &local_free_list);
+			*i_node = (struct lpl_node_struct) {0};
+			list_add_tail_rcu(&i_node->list_node, &local_free_list);
 			target--;
 			stats.pc_inactive_to_free_moved++;
 			continue;
 		}
-		accessed = ml_is_accessed(mm, node->address);
 
-		if(accessed) {
-			iternode_free = iternode;
+		// if page was accessed
+		if(pte_young(*i_ptep)) {
 			iternode = iternode->prev;
-			list_del_rcu(iternode_free);
+			list_del_rcu(&i_node->list_node);
 			inactive_list->size--;
-			list_add_tail_rcu(iternode_free, &local_active_list);
+			list_add_tail_rcu(&i_node->list_node, &local_active_list);
 			stats.pc_inactive_to_active_moved++;
+			*i_ptep = pte_mkold(*i_ptep);
 		}
-
-		ml_clear_accessed(mm, node->address);
 	}
 	write_unlock(&inactive_list->lock);
 
@@ -614,34 +614,30 @@ struct stats_struct balance_lists(struct lpl *active_list, struct lpl *inactive_
 }
 
 int try_to_free_pages(struct dime_instance_struct *dime_instance, struct lpl *pl, int target, struct lpl *free) {
-	int moved_free=0;
-	struct list_head 	*iternode 					= NULL,
-						*iternode_free 				= NULL;
-	struct lpl_node_struct *node = NULL;
-	struct list_head local_free_list = LIST_HEAD_INIT(local_free_list);
+	int						moved_free		= 0;
+	struct list_head		* iternode 		= NULL;
+	struct list_head		local_free_list = LIST_HEAD_INIT(local_free_list);
 
 
 	write_lock(&pl->lock);
 	for(iternode = pl->head.next ; iternode != &pl->head && target > 0; iternode = iternode->next) {
-		struct mm_struct *mm;
-		int accessed, dirty;
+		struct lpl_node_struct	* i_node	= list_entry(iternode, struct lpl_node_struct, list_node);
+		struct task_struct		* i_ts		= pid_task(i_node->pid_s, PIDTYPE_PID);
+		struct mm_struct		* i_mm		= (i_ts == NULL ? NULL : i_ts->mm);
+		pte_t					* i_ptep	= (i_mm == NULL ? NULL : ml_get_ptep(i_mm, i_node->address));
 
-		node = list_entry(iternode, struct lpl_node_struct, list_node);
-		mm = ml_get_mm_struct(node->pid);
-		if(!mm) {
+		if(!i_ptep) {
 			iternode = iternode->prev;
-			list_del_rcu(&node->list_node);
+			list_del_rcu(&i_node->list_node);
 			pl->size--;
-			*node = (struct lpl_node_struct) {0};
-			list_add_tail_rcu(&node->list_node, &local_free_list);
+			*i_node = (struct lpl_node_struct) {0};
+			list_add_tail_rcu(&i_node->list_node, &local_free_list);
 			target--;
 			moved_free++;
 			continue;
 		}
-		accessed = ml_is_accessed(mm, node->address);
-		dirty = ml_is_dirty(mm, node->address);
 
-		/*if(dirty) {
+		/*if(pte_dirty(*i_ptep)) {
 			// emulate page flush, inject delay
 			ulong delay_ns = 0, start_time = sched_clock();
 			delay_ns = ((PAGE_SIZE * 8ULL) * 1000000000ULL) / dime_instance->bandwidth_bps;  // Transmission delay
@@ -653,18 +649,18 @@ int try_to_free_pages(struct dime_instance_struct *dime_instance, struct lpl *pl
 			ml_clear_accessed(mm, node->address);
 		} */
 		
-		if(!accessed) {
-			iternode_free = iternode;
+		if(!pte_young(*i_ptep)) {
 			iternode = iternode->prev;
-			list_del_rcu(iternode_free);
+			list_del_rcu(&i_node->list_node);
 			pl->size--;
 			target--;
-			ml_protect_page(mm, node->address);
-			*node = (struct lpl_node_struct) {0};
-			list_add_tail_rcu(iternode_free, &local_free_list);
+			ml_protect_pte(i_mm, i_node->address, i_ptep);
+			*i_node = (struct lpl_node_struct) {0};
+			list_add_tail_rcu(&i_node->list_node, &local_free_list);
 			moved_free++;
 		}
 	}
+
 	// reposition list head to this point, so that next time we wont scan again previously scanned nodes
 	if(iternode != &pl->head) {
 		list_del_rcu(&pl->head);
@@ -792,7 +788,8 @@ static struct task_struct *dime_kswapd;
 static int dime_kswapd_fn(void *unused) {
 	allow_signal(SIGKILL);
 	while (!kthread_should_stop()) {
-		usleep_range(10,20);
+		//msleep(1);
+		usleep_range(100,200);
 		if (signal_pending(dime_kswapd))
 			break;
 		balance_local_page_lists();

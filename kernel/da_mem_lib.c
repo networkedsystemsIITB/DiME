@@ -198,6 +198,16 @@ int ml_unprotect_page(struct mm_struct *mm, ulong address) {
 }
 EXPORT_SYMBOL(ml_unprotect_page);
 
+int ml_clear_accessed_pte(struct mm_struct *mm, ulong address, pte_t* ptep) {
+	if(ptep && pte_present(*ptep)) {		// TODO:: why check if present
+		*ptep = pte_mkold(*ptep);
+		return 1;	// Success
+	}
+
+	return 0;		// Failure
+}
+EXPORT_SYMBOL(ml_clear_accessed_pte);
+
 int ml_clear_accessed(struct mm_struct *mm, ulong address) {
 	struct vm_area_struct *vma = NULL;
 	pte_t* ptep = ml_get_ptep(mm, address);
@@ -222,7 +232,7 @@ EXPORT_SYMBOL(ml_clear_accessed);
 
 int ml_set_accessed_pte(struct mm_struct *mm, ulong address, pte_t* ptep) {
 	if(ptep && pte_present(*ptep)) {		// TODO:: why check if present
-		pte_mkyoung(*ptep);
+		*ptep = pte_mkyoung(*ptep);
 		return 1;	// Success
 	}
 
@@ -234,7 +244,7 @@ int ml_set_accessed(struct mm_struct *mm, ulong address) {
 	struct vm_area_struct *vma = NULL;
 	pte_t* ptep = ml_get_ptep(mm, address);
 	if(ptep && pte_present(*ptep)) {		// TODO:: why check if present
-		pte_mkyoung(*ptep);
+		*ptep = pte_mkyoung(*ptep);
 
 		vma = find_vma(mm, address);
 		if(vma == NULL || address >= vma->vm_end)
@@ -253,7 +263,7 @@ int ml_clear_dirty(struct mm_struct *mm, ulong address) {
 	struct vm_area_struct *vma = NULL;
 	pte_t* ptep = ml_get_ptep(mm, address);
 	if(ptep && pte_present(*ptep)) {		// TODO:: why check if present
-		set_pte( ptep , pte_clear_flags(*ptep, _PAGE_DIRTY) );
+		*ptep = pte_mkclean(*ptep);
 
 		vma = find_vma(mm, address);
 		if(vma == NULL || address >= vma->vm_end)
