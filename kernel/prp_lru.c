@@ -98,34 +98,34 @@ static ssize_t procfile_read(struct file *file, char *buffer, size_t length, lof
 			struct prp_lru_struct *prp = to_prp_lru_struct(dime.dime_instances[i].prp);
 			procfs_buffer_size += sprintf(procfs_buffer+procfs_buffer_size, 
 											//1  2     3     4   5   6   7   8   9     10   11    12   13    14    15    16    17    18   19    20   21    22   23   24   25   26    27
-											"%2d %11lu %11lu %9d %8d %9d %8d %9d %10lu %9lu %10lu %9lu %10lu %10lu %11lu %10lu %11lu %9lu %10lu %9lu %10lu %9lu %9lu %9lu %9lu %12lu %12lu\n", 
+											"%2d %11lu %11lu %9lu %8lu %9lu %8lu %9lu %10lu %9lu %10lu %9lu %10lu %10lu %11lu %10lu %11lu %9lu %10lu %9lu %10lu %9lu %9lu %9lu %9lu %12lu %12lu\n", 
 																		dime.dime_instances[i].instance_id,	// 1
-																		prp->stats.pc_pagefaults,			// 2
-																		prp->stats.an_pagefaults,			// 3
-																		prp->free.size,						// 4
-																		prp->active_pc.size,				// 5
-																		prp->inactive_pc.size,				// 6
-																		prp->active_an.size,				// 7
-																		prp->inactive_an.size,				// 8
-																		prp->stats.free_evict,				// 9
-																		prp->stats.active_pc_evict,			// 10
-																		prp->stats.inactive_pc_evict,		// 11
-																		prp->stats.active_an_evict,			// 12
-																		prp->stats.inactive_an_evict,		// 13
-																		prp->stats.force_active_pc_evict,	// 14
-																		prp->stats.force_inactive_pc_evict,	// 15
-																		prp->stats.force_active_an_evict,	// 16
-																		prp->stats.force_inactive_an_evict,	// 17
-																		prp->stats.pc_active_to_free_moved,	// 18
-																		prp->stats.pc_inactive_to_free_moved,	// 19
-																		prp->stats.an_active_to_free_moved,		// 20
-																		prp->stats.an_inactive_to_free_moved,	// 21
-																		prp->stats.pc_active_to_inactive_moved, // 22
-																		prp->stats.pc_inactive_to_active_moved,	// 23
-																		prp->stats.an_active_to_inactive_moved,	// 24
-																		prp->stats.an_inactive_to_active_moved,	// 25
-																		prp->stats.pc_inactive_to_active_pf_moved,	// 26
-																		prp->stats.an_inactive_to_active_pf_moved);	// 27
+																		atomic_long_read(&prp->stats.pc_pagefaults),			// 2
+																		atomic_long_read(&prp->stats.an_pagefaults),			// 3
+																		atomic_long_read(&prp->free.size),						// 4
+																		atomic_long_read(&prp->active_pc.size),					// 5
+																		atomic_long_read(&prp->inactive_pc.size),				// 6
+																		atomic_long_read(&prp->active_an.size),					// 7
+																		atomic_long_read(&prp->inactive_an.size),				// 8
+																		atomic_long_read(&prp->stats.free_evict),				// 9
+																		atomic_long_read(&prp->stats.active_pc_evict),			// 10
+																		atomic_long_read(&prp->stats.inactive_pc_evict),		// 11
+																		atomic_long_read(&prp->stats.active_an_evict),			// 12
+																		atomic_long_read(&prp->stats.inactive_an_evict),		// 13
+																		atomic_long_read(&prp->stats.force_active_pc_evict),	// 14
+																		atomic_long_read(&prp->stats.force_inactive_pc_evict),	// 15
+																		atomic_long_read(&prp->stats.force_active_an_evict),	// 16
+																		atomic_long_read(&prp->stats.force_inactive_an_evict),	// 17
+																		atomic_long_read(&prp->stats.pc_active_to_free_moved),	// 18
+																		atomic_long_read(&prp->stats.pc_inactive_to_free_moved),	// 19
+																		atomic_long_read(&prp->stats.an_active_to_free_moved),		// 20
+																		atomic_long_read(&prp->stats.an_inactive_to_free_moved),	// 21
+																		atomic_long_read(&prp->stats.pc_active_to_inactive_moved),	// 22
+																		atomic_long_read(&prp->stats.pc_inactive_to_active_moved),	// 23
+																		atomic_long_read(&prp->stats.an_active_to_inactive_moved),	// 24
+																		atomic_long_read(&prp->stats.an_inactive_to_active_moved),	// 25
+																		atomic_long_read(&prp->stats.pc_inactive_to_active_pf_moved),	// 26
+																		atomic_long_read(&prp->stats.an_inactive_to_active_pf_moved));	// 27
 		}
 	}
 
@@ -162,7 +162,7 @@ struct lpl_node_struct * evict_first_page(struct lpl *from_list) {
 
 		// remove node from list
 		list_del_rcu(&node_to_evict->list_node);
-		from_list->size--;
+		atomic_long_dec(&from_list->size);
 
 		write_unlock(&from_list->lock);
 
@@ -185,7 +185,7 @@ struct lpl_node_struct * evict_single_page(struct lpl *from_list, struct lpl *ac
 	struct lpl_node_struct * node_to_evict = NULL;
 	struct lpl tmp_list =	{
 								.head = LIST_HEAD_INIT(tmp_list.head),
-								.size = 0
+								.size = ATOMIC_LONG_INIT(0)
 							};
 	struct list_head *iternode;
 
@@ -209,7 +209,7 @@ struct lpl_node_struct * evict_single_page(struct lpl *from_list, struct lpl *ac
 		// remove iter node from list
 		iternode = iternode->prev;
 		list_del_rcu(&(i_node->list_node));
-		from_list->size--;
+		atomic_long_dec(&from_list->size);
 
 		i_ts	= pid_task(i_node->pid_s, PIDTYPE_PID);
 		i_mm	= (i_ts == NULL ? NULL : i_ts->mm);
@@ -225,7 +225,7 @@ struct lpl_node_struct * evict_single_page(struct lpl *from_list, struct lpl *ac
 
 		if(accessed) {
 			list_add_tail_rcu(&(i_node->list_node), &tmp_list.head);
-			tmp_list.size++;
+			atomic_long_inc(&tmp_list.size);
 		} else {
 			node_to_evict = i_node;
 			ml_protect_pte(i_mm, i_node->address, i_ptep);
@@ -248,7 +248,7 @@ struct lpl_node_struct * evict_single_page(struct lpl *from_list, struct lpl *ac
 		struct list_head *h = tmp_list.head.next;
 		list_del_rcu(h);
 		list_add_tail_rcu(h, &active_list->head);
-		active_list->size++;
+		atomic_long_inc(&active_list->size);
 		(*from_to_active_moved)++;
 	}
 	write_unlock(&active_list->lock);
@@ -265,7 +265,6 @@ int add_page(struct dime_instance_struct *dime_instance, struct pid * c_pid, ulo
 
 	struct lpl_node_struct	* node_to_evict		= NULL;
 	struct prp_lru_struct	* prp_lru			= to_prp_lru_struct(dime_instance->prp);
-	struct stats_struct 	local_stats			= {0};
 	int 					ret_execute_delay	= 1;
 
 
@@ -273,11 +272,11 @@ int add_page(struct dime_instance_struct *dime_instance, struct pid * c_pid, ulo
 
 	// pages in local memory more than the configured dime instance quota, evict extra pages
 	// possible when instance configuration is changed dynamically using proc file /proc/dime_config
-	if(dime_instance->local_npages < prp_lru->lpl_count) {
+	if(dime_instance->local_npages < atomic_long_read(&prp_lru->lpl_count)) {
 		struct lpl_node_struct * node = NULL;
 		// TODO:: not required till dynamic changes, need to apply locks
 		write_lock(&prp_lru->lock);
-		while (dime_instance->local_npages < prp_lru->lpl_count) {
+		while (dime_instance->local_npages < atomic_long_read(&prp_lru->lpl_count)) {
 			struct list_head *first_node = NULL;
 			if(!list_empty(prp_lru->inactive_pc.head.next))
 				first_node = prp_lru->inactive_pc.head.next;
@@ -290,14 +289,14 @@ int add_page(struct dime_instance_struct *dime_instance, struct pid * c_pid, ulo
 			else
 				DA_ERROR("all lists are empty, unable to select node");
 			list_del_rcu(first_node);
-			prp_lru->lpl_count--;
+			atomic_long_dec(&prp_lru->lpl_count);
 
 			node = list_entry(first_node, struct lpl_node_struct, list_node);
 
 			ml_protect_page(ml_get_mm_struct(node->pid_s->numbers[0].nr), node->address);
 			kfree(node);
 			node = NULL;
-			DA_INFO("remove extra local page, current count:%lu", prp_lru->lpl_count);
+			DA_INFO("remove extra local page, current count:%lu", atomic_long_read(&prp_lru->lpl_count));
 		}
 		write_unlock(&prp_lru->lock);
 	}
@@ -307,7 +306,7 @@ int add_page(struct dime_instance_struct *dime_instance, struct pid * c_pid, ulo
 		// we can treat this case as infinite local pages, and no need to inject delay on any of the page
 		ret_execute_delay = 1;
 		goto EXIT_ADD_PAGE;
-	} else if (dime_instance->local_npages > prp_lru->lpl_count) {
+	} else if (dime_instance->local_npages > atomic_long_read(&prp_lru->lpl_count)) {
 		// Since there is still free space locally for remote pages, delay should not be injected
 		ret_execute_delay = 1;
 		node_to_evict = (struct lpl_node_struct*) kmalloc(sizeof(struct lpl_node_struct), GFP_KERNEL);
@@ -316,92 +315,86 @@ int add_page(struct dime_instance_struct *dime_instance, struct pid * c_pid, ulo
 			DA_ERROR("unable to allocate memory");
 			goto EXIT_ADD_PAGE;
 		} else {
-			write_lock(&prp_lru->lock);
-			prp_lru->lpl_count++;
-			write_unlock(&prp_lru->lock);
-
-			local_stats.free_evict++;
+			atomic_long_inc(&prp_lru->lpl_count);
+			atomic_long_inc(&prp_lru->stats.free_evict);
 		}
 	} else {
 		while(node_to_evict == NULL) {
 			int from_to_active_moved = 0;
 
-			// TODO:: stats lock use
+			// TODO:: switch to the list that we had evicted from for last pagefault,
+			//		  so that we dont have to iterate over all previous lists again unless kswapd thread has gone through all lists
 
 			// search in free list
 			write_lock(&prp_lru->free.lock);
 			node_to_evict = list_first_entry_or_null(&prp_lru->free.head, struct lpl_node_struct, list_node);
+			write_unlock(&prp_lru->free.lock);
 			if(node_to_evict) {
 				list_del_rcu(&node_to_evict->list_node);
-				prp_lru->free.size--;
-				*node_to_evict = (struct lpl_node_struct) {0};
-				local_stats.free_evict++;
-				write_unlock(&prp_lru->free.lock);
+				atomic_long_dec(&prp_lru->free.size);
+				atomic_long_inc(&prp_lru->stats.free_evict);
 				goto FREE_NODE_FOUND;
-			} else {
-				write_unlock(&prp_lru->free.lock);
 			}
 
 			// search from pagecache inactive list
 			from_to_active_moved = 0;
 			node_to_evict = evict_single_page(&prp_lru->inactive_pc, &prp_lru->active_pc, &from_to_active_moved);
+			atomic_long_add(from_to_active_moved, &prp_lru->stats.pc_inactive_to_active_pf_moved);
 			if(node_to_evict) {
-				local_stats.inactive_pc_evict++;
+				atomic_long_inc(&prp_lru->stats.inactive_pc_evict);
 				goto FREE_NODE_FOUND;
 			}
 
 			// search from anon inactive list
 			from_to_active_moved = 0;
 			node_to_evict = evict_single_page(&prp_lru->inactive_an, &prp_lru->active_an, &from_to_active_moved);
-			local_stats.an_inactive_to_active_pf_moved += from_to_active_moved;
+			atomic_long_add(from_to_active_moved, &prp_lru->stats.an_inactive_to_active_pf_moved);
 			if(node_to_evict) {
-				local_stats.inactive_an_evict++;
+				atomic_long_inc(&prp_lru->stats.inactive_an_evict);
 				goto FREE_NODE_FOUND;
 			}
 
 			// search from pagecache active list
 			from_to_active_moved = 0;
 			node_to_evict = evict_single_page(&prp_lru->active_pc, &prp_lru->active_pc, &from_to_active_moved);
-			local_stats.pc_inactive_to_active_pf_moved += from_to_active_moved;
 			if(node_to_evict) {
-				local_stats.active_pc_evict++;
+				atomic_long_inc(&prp_lru->stats.active_pc_evict);
 				goto FREE_NODE_FOUND;
 			}
 
 			// search from anon active list
 			from_to_active_moved = 0;
 			node_to_evict = evict_single_page(&prp_lru->active_an, &prp_lru->active_an, &from_to_active_moved);
-			local_stats.an_inactive_to_active_pf_moved += from_to_active_moved;
 			if(node_to_evict) {
-				local_stats.active_an_evict++;
+				atomic_long_inc(&prp_lru->stats.active_an_evict);
 				goto FREE_NODE_FOUND;
 			}
 
 			// forcefully select from pagecache inactive list
 			node_to_evict = evict_first_page(&prp_lru->inactive_pc);
 			if(node_to_evict) {
-				local_stats.force_inactive_pc_evict++;
+				atomic_long_inc(&prp_lru->stats.force_inactive_pc_evict);
 				goto FREE_NODE_FOUND;
 			}
 
 			// forcefully select from anon inactive list
 			node_to_evict = evict_first_page(&prp_lru->inactive_an);
 			if(node_to_evict) {
-				local_stats.force_inactive_an_evict++;
+				atomic_long_inc(&prp_lru->stats.force_inactive_an_evict);
 				goto FREE_NODE_FOUND;
 			}
 			
 			// forcefully select from pagecache active list
 			node_to_evict = evict_first_page(&prp_lru->active_pc);
 			if(node_to_evict) {
-				local_stats.force_active_pc_evict++;
+				atomic_long_inc(&prp_lru->stats.force_active_pc_evict);
 				goto FREE_NODE_FOUND;
 			}
 
 			// forcefully select from anon active list
 			node_to_evict = evict_first_page(&prp_lru->active_an);
 			if(node_to_evict) {
-				local_stats.force_active_an_evict++;
+				atomic_long_inc(&prp_lru->stats.force_active_an_evict);
 				goto FREE_NODE_FOUND;
 			}
 			
@@ -414,7 +407,6 @@ FREE_NODE_FOUND:
 
 	node_to_evict->address = c_addr;
 	node_to_evict->pid_s = c_pid;
-	//node_to_evict->pid = c_pid->numbers[0].nr;
 	
 	// Sometimes bulk pagefault requests come and evicting any page from these requests will again trigger pagefault.
 	// This happens recursively if accessed bit is not set for each requested page.
@@ -425,47 +417,20 @@ FREE_NODE_FOUND:
 	if( ((unsigned long)(c_page->mapping) & (unsigned long)0x01) != 0 ) {
 		write_lock(&prp_lru->active_an.lock);
 		list_add_tail_rcu(&(node_to_evict->list_node), &prp_lru->active_an.head);
-		prp_lru->active_an.size++;
+		atomic_long_inc(&prp_lru->active_an.size);
 		write_unlock(&prp_lru->active_an.lock);
 
-		local_stats.an_pagefaults++;
+		atomic_long_inc(&prp_lru->stats.an_pagefaults);
 	} else {
 		write_lock(&prp_lru->active_pc.lock);
 		list_add_tail_rcu(&(node_to_evict->list_node), &prp_lru->active_pc.head);
-		prp_lru->active_pc.size++;
+		atomic_long_inc(&prp_lru->active_pc.size);
 		write_unlock(&prp_lru->active_pc.lock);
 
-		local_stats.pc_pagefaults++;
+		atomic_long_inc(&prp_lru->stats.pc_pagefaults);
 	}
 
-//	if(current->pid <= 0)
-//		DA_ERROR("invalid pid: %d : address: %lu", current->pid, c_addr);
-
-
 EXIT_ADD_PAGE:
-	write_lock(&prp_lru->stats.lock);
-	prp_lru->stats.pc_pagefaults 					+= local_stats.pc_pagefaults;
-	prp_lru->stats.an_pagefaults 					+= local_stats.an_pagefaults;
-	prp_lru->stats.free_evict 						+= local_stats.free_evict;
-	prp_lru->stats.active_pc_evict 					+= local_stats.active_pc_evict;
-	prp_lru->stats.inactive_pc_evict 				+= local_stats.inactive_pc_evict;
-	prp_lru->stats.active_an_evict 					+= local_stats.active_an_evict;
-	prp_lru->stats.inactive_an_evict 				+= local_stats.inactive_an_evict;
-	prp_lru->stats.force_active_pc_evict 			+= local_stats.force_active_pc_evict;
-	prp_lru->stats.force_inactive_pc_evict 			+= local_stats.force_inactive_pc_evict;
-	prp_lru->stats.force_active_an_evict 			+= local_stats.force_active_an_evict;
-	prp_lru->stats.force_inactive_an_evict 			+= local_stats.force_inactive_an_evict;
-	prp_lru->stats.pc_active_to_free_moved 			+= local_stats.pc_active_to_free_moved;
-	prp_lru->stats.pc_inactive_to_free_moved 		+= local_stats.pc_inactive_to_free_moved;
-	prp_lru->stats.an_active_to_free_moved 			+= local_stats.an_active_to_free_moved;
-	prp_lru->stats.an_inactive_to_free_moved 		+= local_stats.an_inactive_to_free_moved;
-	prp_lru->stats.pc_active_to_inactive_moved 		+= local_stats.pc_active_to_inactive_moved;
-	prp_lru->stats.pc_inactive_to_active_moved 		+= local_stats.pc_inactive_to_active_moved;
-	prp_lru->stats.an_active_to_inactive_moved 		+= local_stats.an_active_to_inactive_moved;
-	prp_lru->stats.an_inactive_to_active_moved 		+= local_stats.an_inactive_to_active_moved;
-	prp_lru->stats.pc_inactive_to_active_pf_moved 	+= local_stats.pc_inactive_to_active_pf_moved;
-	prp_lru->stats.an_inactive_to_active_pf_moved 	+= local_stats.an_inactive_to_active_pf_moved;
-	write_unlock(&prp_lru->stats.lock);
 
 	return ret_execute_delay;
 }
@@ -507,11 +472,11 @@ struct stats_struct balance_lists(struct lpl *active_list, struct lpl *inactive_
 		if(!i_ptep) {
 			iternode = iternode->prev;
 			list_del_rcu(&i_node->list_node);
-			active_list->size--;
+			atomic_long_dec(&active_list->size);
 			*i_node = (struct lpl_node_struct) {0};
 			list_add_tail_rcu(&i_node->list_node, &local_free_list);
 			target--;
-			stats.pc_active_to_free_moved++;
+			atomic_long_inc(&stats.pc_active_to_free_moved);
 			continue;
 		}
 
@@ -532,10 +497,10 @@ struct stats_struct balance_lists(struct lpl *active_list, struct lpl *inactive_
 		if(!pte_young(*i_ptep)) {
 			iternode = iternode->prev;
 			list_del_rcu(&i_node->list_node);
-			active_list->size--;
+			atomic_long_dec(&active_list->size);
 			target--;
 			list_add_tail_rcu(&i_node->list_node, &local_inactive_list);
-			stats.pc_active_to_inactive_moved++;
+			atomic_long_inc(&stats.pc_active_to_inactive_moved);
 		} else {
 			// clear accessed bit
 			*i_ptep = pte_mkold(*i_ptep);
@@ -561,11 +526,11 @@ struct stats_struct balance_lists(struct lpl *active_list, struct lpl *inactive_
 		if(!i_ptep) {
 			iternode = iternode->prev;
 			list_del_rcu(&i_node->list_node);
-			inactive_list->size--;
+			atomic_long_dec(&inactive_list->size);
 			*i_node = (struct lpl_node_struct) {0};
 			list_add_tail_rcu(&i_node->list_node, &local_free_list);
 			target--;
-			stats.pc_inactive_to_free_moved++;
+			atomic_long_inc(&stats.pc_inactive_to_free_moved);
 			continue;
 		}
 
@@ -573,9 +538,9 @@ struct stats_struct balance_lists(struct lpl *active_list, struct lpl *inactive_
 		if(pte_young(*i_ptep)) {
 			iternode = iternode->prev;
 			list_del_rcu(&i_node->list_node);
-			inactive_list->size--;
+			atomic_long_dec(&inactive_list->size);
 			list_add_tail_rcu(&i_node->list_node, &local_active_list);
-			stats.pc_inactive_to_active_moved++;
+			atomic_long_inc(&stats.pc_inactive_to_active_moved);
 			*i_ptep = pte_mkold(*i_ptep);
 		}
 	}
@@ -588,7 +553,7 @@ struct stats_struct balance_lists(struct lpl *active_list, struct lpl *inactive_
 		struct list_head *h = local_free_list.next;
 		list_del_rcu(h);
 		list_add_tail_rcu(h, &free->head);
-		free->size++;
+		atomic_long_inc(&free->size);
 	}
 	write_unlock(&free->lock);
 
@@ -597,7 +562,7 @@ struct stats_struct balance_lists(struct lpl *active_list, struct lpl *inactive_
 		struct list_head *h = local_active_list.next;
 		list_del_rcu(h);
 		list_add_tail_rcu(h, &active_list->head);
-		active_list->size++;
+		atomic_long_inc(&active_list->size);
 	}
 	write_unlock(&active_list->lock);
 
@@ -606,7 +571,7 @@ struct stats_struct balance_lists(struct lpl *active_list, struct lpl *inactive_
 		struct list_head *h = local_inactive_list.next;
 		list_del_rcu(h);
 		list_add_tail_rcu(h, &inactive_list->head);
-		inactive_list->size++;
+		atomic_long_inc(&inactive_list->size);
 	}
 	write_unlock(&inactive_list->lock);
 
@@ -629,7 +594,7 @@ int try_to_free_pages(struct dime_instance_struct *dime_instance, struct lpl *pl
 		if(!i_ptep) {
 			iternode = iternode->prev;
 			list_del_rcu(&i_node->list_node);
-			pl->size--;
+			atomic_long_dec(&pl->size);
 			*i_node = (struct lpl_node_struct) {0};
 			list_add_tail_rcu(&i_node->list_node, &local_free_list);
 			target--;
@@ -652,7 +617,7 @@ int try_to_free_pages(struct dime_instance_struct *dime_instance, struct lpl *pl
 		if(!pte_young(*i_ptep)) {
 			iternode = iternode->prev;
 			list_del_rcu(&i_node->list_node);
-			pl->size--;
+			atomic_long_dec(&pl->size);
 			target--;
 			ml_protect_pte(i_mm, i_node->address, i_ptep);
 			*i_node = (struct lpl_node_struct) {0};
@@ -673,7 +638,7 @@ int try_to_free_pages(struct dime_instance_struct *dime_instance, struct lpl *pl
 		struct list_head *h = local_free_list.next;
 		list_del_rcu(h);
 		list_add_tail_rcu(h, &free->head);
-		free->size++;
+		atomic_long_inc(&free->size);
 	}
 	write_unlock(&free->lock);
 
@@ -699,7 +664,7 @@ int balance_local_page_lists(void) {
 
 		required_free_size = (MIN_FREE_PAGES_PERCENT * dime_instance->local_npages)/100;
 		required_free_size = required_free_size < MIN_FREE_PAGES ? required_free_size : MIN_FREE_PAGES;
-		free_target = required_free_size - (prp_lru->free.size + dime_instance->local_npages - prp_lru->lpl_count);
+		free_target = required_free_size - (atomic_long_read(&prp_lru->free.size) + dime_instance->local_npages - atomic_long_read(&prp_lru->lpl_count));
 		if(free_target > 0) {
 			/*int target_pi = prp_lru->inactive_pc.size - (18 * dime_instance->local_npages)/100;
 			int target_pa = prp_lru->active_pc.size   - (27 * dime_instance->local_npages)/100;
@@ -725,57 +690,44 @@ int balance_local_page_lists(void) {
 			try_to_free_pages(dime_instance, &prp_lru->active_pc, target_aa, &prp_lru->free);
 			*/
 
-			free_target = required_free_size - prp_lru->free.size;
+			free_target = required_free_size - atomic_long_read(&prp_lru->free.size);
 			free_target = free_target > 0 ? try_to_free_pages(dime_instance, &prp_lru->inactive_pc, free_target, &prp_lru->free) : 0;
-			write_lock(&prp_lru->stats.lock);
-			prp_lru->stats.pc_inactive_to_free_moved += free_target;
-			write_unlock(&prp_lru->stats.lock);
+			atomic_long_add(free_target, &prp_lru->stats.pc_inactive_to_free_moved);
 			
-			free_target = required_free_size - prp_lru->free.size;
+			free_target = required_free_size - atomic_long_read(&prp_lru->free.size);
 			free_target = free_target > 0 ? try_to_free_pages(dime_instance, &prp_lru->inactive_an, free_target, &prp_lru->free) : 0;
-			write_lock(&prp_lru->stats.lock);
-			prp_lru->stats.an_inactive_to_free_moved += free_target;
-			write_unlock(&prp_lru->stats.lock);
-
+			atomic_long_add(free_target, &prp_lru->stats.an_inactive_to_free_moved);
 			
-			free_target = required_free_size - prp_lru->free.size;
+			free_target = required_free_size - atomic_long_read(&prp_lru->free.size);
 			free_target = free_target > 0 ? try_to_free_pages(dime_instance, &prp_lru->active_pc, free_target, &prp_lru->free) : 0;
-			write_lock(&prp_lru->stats.lock);
-			prp_lru->stats.pc_active_to_free_moved += free_target;
-			write_unlock(&prp_lru->stats.lock);
+			atomic_long_add(free_target, &prp_lru->stats.pc_active_to_free_moved);
 			
-			free_target = required_free_size - prp_lru->free.size;
+			free_target = required_free_size - atomic_long_read(&prp_lru->free.size);
 			free_target = free_target > 0 ? try_to_free_pages(dime_instance, &prp_lru->active_pc, free_target, &prp_lru->free) : 0;
-			write_lock(&prp_lru->lock);
-			prp_lru->stats.an_active_to_free_moved += free_target;
-			write_unlock(&prp_lru->lock);
+			atomic_long_add(free_target, &prp_lru->stats.an_active_to_free_moved);
 		}
 
 		/*if(prp_lru->inactive_pc.size < (prp_lru->active_pc.size+prp_lru->inactive_pc.size)*40/100)*/ {
 			// need to move passive pages from active pagecache list to inactive list
-			int target = prp_lru->active_pc.size;//(prp_lru->active_pc.size+prp_lru->inactive_pc.size)*40/100 - prp_lru->inactive_pc.size;
+			int target = atomic_long_read(&prp_lru->active_pc.size);//(prp_lru->active_pc.size+prp_lru->inactive_pc.size)*40/100 - prp_lru->inactive_pc.size;
 			if(target>0) {
 				struct stats_struct stats = balance_lists(&prp_lru->active_pc, &prp_lru->inactive_pc, target, &prp_lru->free);
-				write_lock(&prp_lru->stats.lock);
-				prp_lru->stats.pc_inactive_to_free_moved += stats.pc_inactive_to_free_moved;
-				prp_lru->stats.pc_active_to_free_moved += stats.pc_active_to_free_moved;
-				prp_lru->stats.pc_inactive_to_active_moved += stats.pc_inactive_to_active_moved;
-				prp_lru->stats.pc_active_to_inactive_moved += stats.pc_active_to_inactive_moved;
-				write_unlock(&prp_lru->stats.lock);
+				atomic_long_add(atomic_long_read(&stats.pc_inactive_to_free_moved)		, &prp_lru->stats.pc_inactive_to_free_moved);
+				atomic_long_add(atomic_long_read(&stats.pc_active_to_free_moved)		, &prp_lru->stats.pc_active_to_free_moved);
+				atomic_long_add(atomic_long_read(&stats.pc_inactive_to_active_moved)	, &prp_lru->stats.pc_inactive_to_active_moved);
+				atomic_long_add(atomic_long_read(&stats.pc_active_to_inactive_moved)	, &prp_lru->stats.pc_active_to_inactive_moved);
 			}
 		}
 
 		/*if(prp_lru->inactive_an.size < (prp_lru->active_an.size+prp_lru->inactive_an.size)*40/100)*/ {
 			// need to move passive pages from active pagecache list to inactive list
-			int target = prp_lru->active_an.size;//(prp_lru->active_an.size+prp_lru->inactive_an.size)*40/100 - prp_lru->inactive_an.size;
+			int target = atomic_long_read(&prp_lru->active_an.size);//(prp_lru->active_an.size+prp_lru->inactive_an.size)*40/100 - prp_lru->inactive_an.size;
 			if(target>0) {
 				struct stats_struct stats = balance_lists(&prp_lru->active_an, &prp_lru->inactive_an, target, &prp_lru->free);
-				write_lock(&prp_lru->stats.lock);
-				prp_lru->stats.an_inactive_to_free_moved += stats.pc_inactive_to_free_moved;
-				prp_lru->stats.an_active_to_free_moved += stats.pc_active_to_free_moved;
-				prp_lru->stats.an_inactive_to_active_moved += stats.pc_inactive_to_active_moved;
-				prp_lru->stats.an_active_to_inactive_moved += stats.pc_active_to_inactive_moved;
-				write_unlock(&prp_lru->stats.lock);
+				atomic_long_add(atomic_long_read(&stats.pc_inactive_to_free_moved)		, &prp_lru->stats.an_inactive_to_free_moved);
+				atomic_long_add(atomic_long_read(&stats.pc_active_to_free_moved)		, &prp_lru->stats.an_active_to_free_moved);
+				atomic_long_add(atomic_long_read(&stats.pc_inactive_to_active_moved)	, &prp_lru->stats.an_inactive_to_active_moved);
+				atomic_long_add(atomic_long_read(&stats.pc_active_to_inactive_moved)	, &prp_lru->stats.an_active_to_inactive_moved);
 			}
 		}
 	}
@@ -859,14 +811,13 @@ int init_module(void) {
 		INIT_LIST_HEAD(&prp_lru->active_pc.head);
 		INIT_LIST_HEAD(&prp_lru->inactive_an.head);
 		INIT_LIST_HEAD(&prp_lru->inactive_pc.head);
-		prp_lru->lpl_count = 0;
-		prp_lru->free.size = 0;
-		prp_lru->active_pc.size = 0;
-		prp_lru->active_an.size = 0;
-		prp_lru->inactive_pc.size = 0;
-		prp_lru->inactive_an.size = 0;
+		atomic_long_set(&prp_lru->lpl_count, 0);
+		atomic_long_set(&prp_lru->free.size, 0);
+		atomic_long_set(&prp_lru->active_pc.size, 0);
+		atomic_long_set(&prp_lru->active_an.size, 0);
+		atomic_long_set(&prp_lru->inactive_pc.size, 0);
+		atomic_long_set(&prp_lru->inactive_an.size, 0);
 		prp_lru->stats = (struct stats_struct) {0};
-		rwlock_init(&(prp_lru->stats.lock));
 
 		prp_lru->prp.add_page = add_page;
 		prp_lru->prp.clean = lpl_CleanList;

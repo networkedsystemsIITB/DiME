@@ -44,7 +44,7 @@ struct lpl_node_struct {
 // local page list struct
 struct lpl {
 	struct list_head 	head;
-	int 				size;
+	atomic_long_t		size;
 	rwlock_t 			lock;
 };
 
