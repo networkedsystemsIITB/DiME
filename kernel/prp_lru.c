@@ -146,7 +146,24 @@ static ssize_t procfile_write(struct file *file, const char *buffer, size_t leng
 	return length;
 }
 
+// Append second lpl(local page list) to first
+void append_local_page_list(struct lpl * first, struct lpl * second) {
+	write_lock(&second->lock);
+	if(!list_empty(&second->head)) {
+		write_lock(&first->lock);
 
+		second->head.prev->next	= &first->head;
+		second->head.next->prev	= first->head.prev;
+
+		first->head.prev->next	= second->head.next;
+		first->head.prev		= second->head.prev;
+
+		atomic_long_add(atomic_long_read(&second->size), &first->size);
+
+		write_unlock(&first->lock);
+	}
+	write_unlock(&second->lock);
+}
 
 struct lpl_node_struct * evict_first_page(struct lpl *from_list) {
 	struct lpl_node_struct * node_to_evict = NULL;
@@ -185,7 +202,8 @@ struct lpl_node_struct * evict_single_page(struct lpl *from_list, struct lpl *ac
 	struct lpl_node_struct * node_to_evict = NULL;
 	struct lpl tmp_list =	{
 								.head = LIST_HEAD_INIT(tmp_list.head),
-								.size = ATOMIC_LONG_INIT(0)
+								.size = ATOMIC_LONG_INIT(0),
+								.lock = __RW_LOCK_UNLOCKED(tmp_list.lock)
 							};
 	struct list_head *iternode;
 
@@ -226,6 +244,7 @@ struct lpl_node_struct * evict_single_page(struct lpl *from_list, struct lpl *ac
 		if(accessed) {
 			list_add_tail_rcu(&(i_node->list_node), &tmp_list.head);
 			atomic_long_inc(&tmp_list.size);
+			(*from_to_active_moved)++;
 		} else {
 			node_to_evict = i_node;
 			ml_protect_pte(i_mm, i_node->address, i_ptep);
@@ -243,15 +262,7 @@ struct lpl_node_struct * evict_single_page(struct lpl *from_list, struct lpl *ac
 
 
 	// append all temp list nodes to active list
-	write_lock(&active_list->lock);
-	while(!list_empty(&tmp_list.head)) {
-		struct list_head *h = tmp_list.head.next;
-		list_del_rcu(h);
-		list_add_tail_rcu(h, &active_list->head);
-		atomic_long_inc(&active_list->size);
-		(*from_to_active_moved)++;
-	}
-	write_unlock(&active_list->lock);
+	append_local_page_list(active_list, &tmp_list);
 
 	return node_to_evict;
 }
@@ -455,11 +466,23 @@ size of anonymous inactive list = Maybe 30% of anonymous pages on a 1GB system, 
  *	This function always sets values for pagecache statistic variables, calling function should update correct stats in original prp_struct.
  */
 struct stats_struct balance_lists(struct lpl *active_list, struct lpl *inactive_list, int target, struct lpl *free) {
-	struct stats_struct		stats					= {0};
-	struct list_head 		* iternode				= NULL;
-	struct list_head 		local_free_list			= LIST_HEAD_INIT(local_free_list);
-	struct list_head 		local_inactive_list		= LIST_HEAD_INIT(local_inactive_list);
-	struct list_head 		local_active_list		= LIST_HEAD_INIT(local_active_list);
+	struct stats_struct	stats					= {0};
+	struct list_head 	* iternode				= NULL;
+	struct lpl 			local_free_list			= {
+													.head = LIST_HEAD_INIT(local_free_list.head),
+													.size = ATOMIC_LONG_INIT(0),
+													.lock = __RW_LOCK_UNLOCKED(local_free_list.lock)
+												};
+	struct lpl 			local_inactive_list		= {
+													.head = LIST_HEAD_INIT(local_inactive_list.head),
+													.size = ATOMIC_LONG_INIT(0),
+													.lock = __RW_LOCK_UNLOCKED(local_inactive_list.lock)
+												};
+	struct lpl 			local_active_list		= {
+													.head = LIST_HEAD_INIT(local_active_list.head),
+													.size = ATOMIC_LONG_INIT(0),
+													.lock = __RW_LOCK_UNLOCKED(local_active_list.lock)
+												};
 
 	// move non-accessed pages to inactive list
 	write_lock(&active_list->lock);
@@ -471,10 +494,13 @@ struct stats_struct balance_lists(struct lpl *active_list, struct lpl *inactive_
 
 		if(!i_ptep) {
 			iternode = iternode->prev;
+
 			list_del_rcu(&i_node->list_node);
 			atomic_long_dec(&active_list->size);
-			*i_node = (struct lpl_node_struct) {0};
-			list_add_tail_rcu(&i_node->list_node, &local_free_list);
+
+			list_add_tail_rcu(&i_node->list_node, &local_free_list.head);
+			atomic_long_inc(&local_free_list.size);
+
 			target--;
 			atomic_long_inc(&stats.pc_active_to_free_moved);
 			continue;
@@ -496,10 +522,14 @@ struct stats_struct balance_lists(struct lpl *active_list, struct lpl *inactive_
 		// if page was not accessed
 		if(!pte_young(*i_ptep)) {
 			iternode = iternode->prev;
+
 			list_del_rcu(&i_node->list_node);
 			atomic_long_dec(&active_list->size);
+
+			list_add_tail_rcu(&i_node->list_node, &local_inactive_list.head);
+			atomic_long_inc(&local_inactive_list.size);
+
 			target--;
-			list_add_tail_rcu(&i_node->list_node, &local_inactive_list);
 			atomic_long_inc(&stats.pc_active_to_inactive_moved);
 		} else {
 			// clear accessed bit
@@ -525,10 +555,13 @@ struct stats_struct balance_lists(struct lpl *active_list, struct lpl *inactive_
 
 		if(!i_ptep) {
 			iternode = iternode->prev;
+
 			list_del_rcu(&i_node->list_node);
 			atomic_long_dec(&inactive_list->size);
-			*i_node = (struct lpl_node_struct) {0};
-			list_add_tail_rcu(&i_node->list_node, &local_free_list);
+
+			list_add_tail_rcu(&i_node->list_node, &local_free_list.head);
+			atomic_long_inc(&local_free_list.size);
+
 			target--;
 			atomic_long_inc(&stats.pc_inactive_to_free_moved);
 			continue;
@@ -537,9 +570,13 @@ struct stats_struct balance_lists(struct lpl *active_list, struct lpl *inactive_
 		// if page was accessed
 		if(pte_young(*i_ptep)) {
 			iternode = iternode->prev;
+
 			list_del_rcu(&i_node->list_node);
 			atomic_long_dec(&inactive_list->size);
-			list_add_tail_rcu(&i_node->list_node, &local_active_list);
+
+			list_add_tail_rcu(&i_node->list_node, &local_active_list.head);
+			atomic_long_inc(&local_active_list.size);
+
 			atomic_long_inc(&stats.pc_inactive_to_active_moved);
 			*i_ptep = pte_mkold(*i_ptep);
 		}
@@ -547,33 +584,10 @@ struct stats_struct balance_lists(struct lpl *active_list, struct lpl *inactive_
 	write_unlock(&inactive_list->lock);
 
 
-
-	write_lock(&free->lock);
-	while(!list_empty(&local_free_list)) {
-		struct list_head *h = local_free_list.next;
-		list_del_rcu(h);
-		list_add_tail_rcu(h, &free->head);
-		atomic_long_inc(&free->size);
-	}
-	write_unlock(&free->lock);
-
-	write_lock(&active_list->lock);
-	while(!list_empty(&local_active_list)) {
-		struct list_head *h = local_active_list.next;
-		list_del_rcu(h);
-		list_add_tail_rcu(h, &active_list->head);
-		atomic_long_inc(&active_list->size);
-	}
-	write_unlock(&active_list->lock);
-
-	write_lock(&inactive_list->lock);
-	while(!list_empty(&local_inactive_list)) {
-		struct list_head *h = local_inactive_list.next;
-		list_del_rcu(h);
-		list_add_tail_rcu(h, &inactive_list->head);
-		atomic_long_inc(&inactive_list->size);
-	}
-	write_unlock(&inactive_list->lock);
+	// append local lists to corresponding prp lists
+	append_local_page_list(free, &local_free_list);
+	append_local_page_list(active_list, &local_active_list);
+	append_local_page_list(inactive_list, &local_inactive_list);
 
 	return stats;
 }
@@ -581,7 +595,11 @@ struct stats_struct balance_lists(struct lpl *active_list, struct lpl *inactive_
 int try_to_free_pages(struct dime_instance_struct *dime_instance, struct lpl *pl, int target, struct lpl *free) {
 	int						moved_free		= 0;
 	struct list_head		* iternode 		= NULL;
-	struct list_head		local_free_list = LIST_HEAD_INIT(local_free_list);
+	struct lpl 				local_free_list	= { 
+												.head = LIST_HEAD_INIT(local_free_list.head),
+												.size = ATOMIC_LONG_INIT(0),
+												.lock = __RW_LOCK_UNLOCKED(local_free_list.lock)
+											};
 
 
 	write_lock(&pl->lock);
@@ -593,10 +611,13 @@ int try_to_free_pages(struct dime_instance_struct *dime_instance, struct lpl *pl
 
 		if(!i_ptep) {
 			iternode = iternode->prev;
+
 			list_del_rcu(&i_node->list_node);
 			atomic_long_dec(&pl->size);
-			*i_node = (struct lpl_node_struct) {0};
-			list_add_tail_rcu(&i_node->list_node, &local_free_list);
+
+			list_add_tail_rcu(&i_node->list_node, &local_free_list.head);
+			atomic_long_inc(&local_free_list.size);
+
 			target--;
 			moved_free++;
 			continue;
@@ -614,14 +635,18 @@ int try_to_free_pages(struct dime_instance_struct *dime_instance, struct lpl *pl
 			ml_clear_accessed(mm, node->address);
 		} */
 		
+		// if page was not accessed
 		if(!pte_young(*i_ptep)) {
 			iternode = iternode->prev;
+
 			list_del_rcu(&i_node->list_node);
 			atomic_long_dec(&pl->size);
-			target--;
+
+			list_add_tail_rcu(&i_node->list_node, &local_free_list.head);
+			atomic_long_inc(&local_free_list.size);
+
 			ml_protect_pte(i_mm, i_node->address, i_ptep);
-			*i_node = (struct lpl_node_struct) {0};
-			list_add_tail_rcu(&i_node->list_node, &local_free_list);
+			target--;
 			moved_free++;
 		}
 	}
@@ -633,14 +658,8 @@ int try_to_free_pages(struct dime_instance_struct *dime_instance, struct lpl *pl
 	}
 	write_unlock(&pl->lock);
 
-	write_lock(&free->lock);
-	while(!list_empty(&local_free_list)) {
-		struct list_head *h = local_free_list.next;
-		list_del_rcu(h);
-		list_add_tail_rcu(h, &free->head);
-		atomic_long_inc(&free->size);
-	}
-	write_unlock(&free->lock);
+	// append local free pages to prp free list
+	append_local_page_list(free, &local_free_list);
 
 	return moved_free;
 }
