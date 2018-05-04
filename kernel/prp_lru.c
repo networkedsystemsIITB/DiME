@@ -339,12 +339,14 @@ int add_page(struct dime_instance_struct *dime_instance, struct pid * c_pid, ulo
 			// search in free list
 			write_lock(&prp_lru->free.lock);
 			node_to_evict = list_first_entry_or_null(&prp_lru->free.head, struct lpl_node_struct, list_node);
-			write_unlock(&prp_lru->free.lock);
 			if(node_to_evict) {
 				list_del_rcu(&node_to_evict->list_node);
+				write_unlock(&prp_lru->free.lock);
 				atomic_long_dec(&prp_lru->free.size);
 				atomic_long_inc(&prp_lru->stats.free_evict);
 				goto FREE_NODE_FOUND;
+			} else {
+				write_unlock(&prp_lru->free.lock);
 			}
 
 			// search from pagecache inactive list
@@ -759,8 +761,8 @@ static struct task_struct *dime_kswapd;
 static int dime_kswapd_fn(void *unused) {
 	allow_signal(SIGKILL);
 	while (!kthread_should_stop()) {
-		//msleep(1);
-		usleep_range(100,200);
+		msleep(10);
+		//usleep_range(100,200);
 		if (signal_pending(dime_kswapd))
 			break;
 		balance_local_page_lists();
@@ -786,6 +788,47 @@ void __lpl_CleanList (struct list_head *prp) {
 
 void lpl_CleanList (struct dime_instance_struct *dime_instance) {
 	struct prp_lru_struct *prp_lru = to_prp_lru_struct(dime_instance->prp);
+
+	struct list_head * iternode = NULL;
+	long int count = 0;
+	for(iternode = prp_lru->free.head.next ; iternode != &prp_lru->free.head ; iternode=iternode->next) {
+		count++;
+	}
+	if(count != atomic_long_read(&prp_lru->free.size)) {
+		DA_ERROR("size mismatch : free : %ld expected %ld", count, atomic_long_read(&prp_lru->free.size));
+	}
+
+	count = 0;
+	for(iternode = prp_lru->active_an.head.next ; iternode != &prp_lru->active_an.head ; iternode=iternode->next) {
+		count++;
+	}
+	if(count != atomic_long_read(&prp_lru->active_an.size)) {
+		DA_ERROR("size mismatch : active_an : %ld expected %ld", count, atomic_long_read(&prp_lru->active_an.size));
+	}
+
+	count = 0;
+	for(iternode = prp_lru->inactive_an.head.next ; iternode != &prp_lru->inactive_an.head ; iternode=iternode->next) {
+		count++;
+	}
+	if(count != atomic_long_read(&prp_lru->inactive_an.size)) {
+		DA_ERROR("size mismatch : inactive_an : %ld expected %ld", count, atomic_long_read(&prp_lru->inactive_an.size));
+	}
+
+	count = 0;
+	for(iternode = prp_lru->active_pc.head.next ; iternode != &prp_lru->active_pc.head ; iternode=iternode->next) {
+		count++;
+	}
+	if(count != atomic_long_read(&prp_lru->active_pc.size)) {
+		DA_ERROR("size mismatch : active_pc : %ld expected %ld", count, atomic_long_read(&prp_lru->active_pc.size));
+	}
+	
+	count = 0;
+	for(iternode = prp_lru->inactive_pc.head.next ; iternode != &prp_lru->inactive_pc.head ; iternode=iternode->next) {
+		count++;
+	}
+	if(count != atomic_long_read(&prp_lru->inactive_pc.size)) {
+		DA_ERROR("size mismatch : inactive_pc : %ld expected %ld", count, atomic_long_read(&prp_lru->inactive_pc.size));
+	}
 
 	__lpl_CleanList(&prp_lru->free.head);
 	__lpl_CleanList(&prp_lru->active_an.head);
