@@ -245,6 +245,7 @@ int do_page_fault_hook_end_new (struct pt_regs *regs,
             delay_ns = 0;
             delay_ns = ((PAGE_SIZE * 8ULL) * 1000000000ULL) / dime_instance->bandwidth_bps;  // Transmission delay
             delay_ns += 2*dime_instance->latency_ns;                                         // Two way latency
+            *hook_timestamp = sched_clock();    // Do not subtract page fault handler time
             while ((sched_clock() - *hook_timestamp) < delay_ns) {
                 // Wait for delay
                 //count++;
