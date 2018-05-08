@@ -36,6 +36,17 @@ MODULE_AUTHOR("Abhishek Ghogare, Dhantu");
 MODULE_DESCRIPTION("DiME LRU page replacement policy");
 
 
+static int		kswapd_sleep_ms			= 1;
+static ulong	free_list_max_size		= 4000ULL;
+
+module_param(kswapd_sleep_ms, int, 0644);
+module_param(free_list_max_size, ulong, 0644);
+#define MIN_FREE_PAGES_PERCENT 	10				// percentage of local memory available in free list
+
+MODULE_PARM_DESC(kswapd_sleep_ms, "Sleep time in ms of dime_kswapd thread");
+MODULE_PARM_DESC(free_list_max_size, "Max size of free list");
+
+
 static struct prp_lru_struct *to_prp_lru_struct(struct page_replacement_policy_struct *prp)
 {
 	return container_of(prp, struct prp_lru_struct, prp);
@@ -92,14 +103,18 @@ static ssize_t procfile_read(struct file *file, char *buffer, size_t length, lof
 		// offset is 0, so first call to read the file.
 		// Initialize buffer with config parameters currently set
 		int i;
-		//											 1  2           3           4         5        6         7        8         9          10        11         12        13         14         15          16         17          18        19         20        21         22        23        24        25	     26           27
-		procfs_buffer_size = sprintf(procfs_buffer, "id pc_pf_count an_pf_count free_size apc_size inpc_size aan_size inan_size free_evict apc_evict inpc_evict aan_evict inan_evict fapc_evict finpc_evict faan_evict finan_evict apc->free inpc->free aan->free inan->free apc->inpc inpc->apc aan->inan inan->aan inpc->apc_pf inan->aan_pf\n");
+		//											 1  1A         1B            2           3           4         5        6         7        8         9          10        11         12        13         14         15          16         17          18        19         20        21         22        23        24        25	     26           27
+		procfs_buffer_size = sprintf(procfs_buffer, "id kswp_sleep free_max_size pc_pf_count an_pf_count free_size apc_size inpc_size aan_size inan_size free_evict apc_evict inpc_evict aan_evict inan_evict fapc_evict finpc_evict faan_evict finan_evict apc->free inpc->free aan->free inan->free apc->inpc inpc->apc aan->inan inan->aan inpc->apc_pf inan->aan_pf\n");
 		for(i=0 ; i<dime.dime_instances_size ; ++i) {
 			struct prp_lru_struct *prp = to_prp_lru_struct(dime.dime_instances[i].prp);
+			ulong free_list_size = (MIN_FREE_PAGES_PERCENT * dime.dime_instances[i].local_npages)/100;
+			free_list_size = free_list_size < free_list_max_size ? free_list_size : free_list_max_size;
 			procfs_buffer_size += sprintf(procfs_buffer+procfs_buffer_size, 
-											//1  2     3     4   5   6   7   8   9     10   11    12   13    14    15    16    17    18   19    20   21    22   23   24   25   26    27
-											"%2d %11lu %11lu %9lu %8lu %9lu %8lu %9lu %10lu %9lu %10lu %9lu %10lu %10lu %11lu %10lu %11lu %9lu %10lu %9lu %10lu %9lu %9lu %9lu %9lu %12lu %12lu\n", 
-																		dime.dime_instances[i].instance_id,	// 1
+											//1  1A   1B    2     3     4   5   6   7   8   9     10   11    12   13    14    15    16    17    18   19    20   21    22   23   24   25   26    27
+											"%2d %10d %13lu %11lu %11lu %9lu %8lu %9lu %8lu %9lu %10lu %9lu %10lu %9lu %10lu %10lu %11lu %10lu %11lu %9lu %10lu %9lu %10lu %9lu %9lu %9lu %9lu %12lu %12lu\n", 
+																		dime.dime_instances[i].instance_id,						// 1
+																		kswapd_sleep_ms,										// 1A
+																		free_list_size,											// 1B
 																		atomic_long_read(&prp->stats.pc_pagefaults),			// 2
 																		atomic_long_read(&prp->stats.an_pagefaults),			// 3
 																		atomic_long_read(&prp->free.size),						// 4
@@ -460,8 +475,6 @@ zone->pages_low = (zone->pages_min * 5) / 4;   // in file mm/page_alloc.c
 pagecache list size: As long as the working set is smaller than half of the file cache, it is completely protected from the page eviction code.
 size of anonymous inactive list = Maybe 30% of anonymous pages on a 1GB system, but 1% of anonymous pages on a 1TB system?
 */
-#define MIN_FREE_PAGES_PERCENT 	10		// percentage of local memory available in free list
-#define MIN_FREE_PAGES 			5000	// min # of local memory available in free list
 
 /*
  *	Returns statistics of moved pages around active/inactive lists.
@@ -684,7 +697,7 @@ int balance_local_page_lists(void) {
 		//	continue;
 
 		required_free_size = (MIN_FREE_PAGES_PERCENT * dime_instance->local_npages)/100;
-		required_free_size = required_free_size < MIN_FREE_PAGES ? required_free_size : MIN_FREE_PAGES;
+		required_free_size = required_free_size < free_list_max_size ? required_free_size : free_list_max_size;
 		free_target = required_free_size - (atomic_long_read(&prp_lru->free.size) + dime_instance->local_npages - atomic_long_read(&prp_lru->lpl_count));
 		if(free_target > 0) {
 			/*int target_pi = prp_lru->inactive_pc.size - (18 * dime_instance->local_npages)/100;
@@ -711,19 +724,19 @@ int balance_local_page_lists(void) {
 			try_to_free_pages(dime_instance, &prp_lru->active_pc, target_aa, &prp_lru->free);
 			*/
 
-			free_target = required_free_size - atomic_long_read(&prp_lru->free.size);
+			free_target = required_free_size - (atomic_long_read(&prp_lru->free.size) + dime_instance->local_npages - atomic_long_read(&prp_lru->lpl_count));
 			free_target = free_target > 0 ? try_to_free_pages(dime_instance, &prp_lru->inactive_pc, free_target, &prp_lru->free) : 0;
 			atomic_long_add(free_target, &prp_lru->stats.pc_inactive_to_free_moved);
 			
-			free_target = required_free_size - atomic_long_read(&prp_lru->free.size);
+			free_target = required_free_size - (atomic_long_read(&prp_lru->free.size) + dime_instance->local_npages - atomic_long_read(&prp_lru->lpl_count));
 			free_target = free_target > 0 ? try_to_free_pages(dime_instance, &prp_lru->inactive_an, free_target, &prp_lru->free) : 0;
 			atomic_long_add(free_target, &prp_lru->stats.an_inactive_to_free_moved);
 			
-			free_target = required_free_size - atomic_long_read(&prp_lru->free.size);
+			free_target = required_free_size - (atomic_long_read(&prp_lru->free.size) + dime_instance->local_npages - atomic_long_read(&prp_lru->lpl_count));
 			free_target = free_target > 0 ? try_to_free_pages(dime_instance, &prp_lru->active_pc, free_target, &prp_lru->free) : 0;
 			atomic_long_add(free_target, &prp_lru->stats.pc_active_to_free_moved);
 			
-			free_target = required_free_size - atomic_long_read(&prp_lru->free.size);
+			free_target = required_free_size - (atomic_long_read(&prp_lru->free.size) + dime_instance->local_npages - atomic_long_read(&prp_lru->lpl_count));
 			free_target = free_target > 0 ? try_to_free_pages(dime_instance, &prp_lru->active_pc, free_target, &prp_lru->free) : 0;
 			atomic_long_add(free_target, &prp_lru->stats.an_active_to_free_moved);
 		}
@@ -761,7 +774,7 @@ static struct task_struct *dime_kswapd;
 static int dime_kswapd_fn(void *unused) {
 	allow_signal(SIGKILL);
 	while (!kthread_should_stop()) {
-		msleep(10);
+		msleep(kswapd_sleep_ms);
 		//usleep_range(100,200);
 		if (signal_pending(dime_kswapd))
 			break;
@@ -916,13 +929,13 @@ init_exit:
 void cleanup_module(void) {
 	int i;
 	DA_ENTRY();
-	
-	cleanup_dime_prp_config_procfs();
 
 	if(dime_kswapd) {
 		kthread_stop(dime_kswapd);
 		DA_INFO("dime_kswapd thread stopped");
 	}
+
+	cleanup_dime_prp_config_procfs();
 
 	for(i=0 ; i<dime.dime_instances_size ; ++i) {
 		lpl_CleanList(&dime.dime_instances[i]);
