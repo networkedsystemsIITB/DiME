@@ -198,17 +198,20 @@ int add_page(struct dime_instance_struct *dime_instance, struct pid * c_pid, ulo
 
 
 	c_page = ml_get_page_sruct(c_mm, address);
-	
-	if( ((unsigned long)(c_page->mapping) & (unsigned long)0x01) != 0 ) {
-		write_lock(&prp_fifo->stats.lock);
-		prp_fifo->stats.an_pagefaults++;
-		write_unlock(&prp_fifo->stats.lock);
-		//DA_DEBUG("this is anonymous page: %lu, pid: %d", address, node->pid);
+	if(c_page) {
+		if( ((unsigned long)(c_page->mapping) & (unsigned long)0x01) != 0 ) {
+			write_lock(&prp_fifo->stats.lock);
+			prp_fifo->stats.an_pagefaults++;
+			write_unlock(&prp_fifo->stats.lock);
+			//DA_DEBUG("this is anonymous page: %lu, pid: %d", address, node->pid);
+		} else {
+			write_lock(&prp_fifo->stats.lock);
+			prp_fifo->stats.pc_pagefaults++;
+			write_unlock(&prp_fifo->stats.lock);
+			//DA_DEBUG("this is pagecache page: %lu, pid: %d", address, node->pid);
+		}
 	} else {
-		write_lock(&prp_fifo->stats.lock);
-		prp_fifo->stats.pc_pagefaults++;
-		write_unlock(&prp_fifo->stats.lock);
-		//DA_DEBUG("this is pagecache page: %lu, pid: %d", address, node->pid);
+		DA_ERROR("invalid page mapping %lx : %p : %p", address, c_page, c_page->mapping);
 	}
 
 	return ret_execute_delay;

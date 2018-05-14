@@ -442,20 +442,24 @@ FREE_NODE_FOUND:
 	// TODO:: verify requirement of this
 	ml_set_accessed_pte(c_mm, c_addr, c_ptep);
 
-	if( ((unsigned long)(c_page->mapping) & (unsigned long)0x01) != 0 ) {
-		write_lock(&prp_lru->active_an.lock);
-		list_add_tail_rcu(&(node_to_evict->list_node), &prp_lru->active_an.head);
-		atomic_long_inc(&prp_lru->active_an.size);
-		write_unlock(&prp_lru->active_an.lock);
+	if(c_page) {
+		if( ((unsigned long)(c_page->mapping) & (unsigned long)0x01) != 0 ) {
+			write_lock(&prp_lru->active_an.lock);
+			list_add_tail_rcu(&(node_to_evict->list_node), &prp_lru->active_an.head);
+			atomic_long_inc(&prp_lru->active_an.size);
+			write_unlock(&prp_lru->active_an.lock);
 
-		atomic_long_inc(&prp_lru->stats.an_pagefaults);
+			atomic_long_inc(&prp_lru->stats.an_pagefaults);
+		} else {
+			write_lock(&prp_lru->active_pc.lock);
+			list_add_tail_rcu(&(node_to_evict->list_node), &prp_lru->active_pc.head);
+			atomic_long_inc(&prp_lru->active_pc.size);
+			write_unlock(&prp_lru->active_pc.lock);
+
+			atomic_long_inc(&prp_lru->stats.pc_pagefaults);
+		}
 	} else {
-		write_lock(&prp_lru->active_pc.lock);
-		list_add_tail_rcu(&(node_to_evict->list_node), &prp_lru->active_pc.head);
-		atomic_long_inc(&prp_lru->active_pc.size);
-		write_unlock(&prp_lru->active_pc.lock);
-
-		atomic_long_inc(&prp_lru->stats.pc_pagefaults);
+		DA_ERROR("invalid c_page mapping : %p : %p", c_page, c_page->mapping);
 	}
 
 EXIT_ADD_PAGE:
@@ -520,19 +524,6 @@ struct stats_struct balance_lists(struct lpl *active_list, struct lpl *inactive_
 			atomic_long_inc(&stats.pc_active_to_free_moved);
 			continue;
 		}
-
-		// TODO:: what to do with dirty page?
-
-		/*if(pte_dirty(*i_ptep)) {
-			// emulate page flush, inject delay
-			ulong delay_ns = 0, start_time = sched_clock();
-			delay_ns = ((PAGE_SIZE * 8ULL) * 1000000000ULL) / dime_instance->bandwidth_bps;  // Transmission delay
-			delay_ns += 2*dime_instance->latency_ns;                                         // Two way latency
-			while ((sched_clock() - start_time) < delay_ns) {
-				// Wait for delay
-			}
-			ml_clear_dirty(mm, node->address);
-		}*/
 
 		// if page was not accessed
 		if(!pte_young(*i_ptep)) {
@@ -637,18 +628,6 @@ int try_to_free_pages(struct dime_instance_struct *dime_instance, struct lpl *pl
 			moved_free++;
 			continue;
 		}
-
-		/*if(pte_dirty(*i_ptep)) {
-			// emulate page flush, inject delay
-			ulong delay_ns = 0, start_time = sched_clock();
-			delay_ns = ((PAGE_SIZE * 8ULL) * 1000000000ULL) / dime_instance->bandwidth_bps;  // Transmission delay
-			delay_ns += 2*dime_instance->latency_ns;                                         // Two way latency
-			while ((sched_clock() - start_time) < delay_ns) {
-				// Wait for delay
-			}
-			ml_clear_dirty(mm, node->address);
-			ml_clear_accessed(mm, node->address);
-		} */
 		
 		// if page was not accessed
 		if(!pte_young(*i_ptep)) {
@@ -656,6 +635,20 @@ int try_to_free_pages(struct dime_instance_struct *dime_instance, struct lpl *pl
 
 			list_del_rcu(&i_node->list_node);
 			atomic_long_dec(&pl->size);
+
+			// inject delay if dirty page
+			if(pte_dirty(*i_ptep)) {
+				// emulate page flush, inject delay
+				ulong delay_ns = 0, start_time = sched_clock();
+				delay_ns = ((PAGE_SIZE * 8ULL) * 1000000000ULL) / dime_instance->bandwidth_bps;  // Transmission delay
+				delay_ns += 2*dime_instance->latency_ns;                                         // Two way latency
+				while ((sched_clock() - start_time) < delay_ns) {
+					// Wait for delay
+				}
+
+				// clear dirty bit
+				*i_ptep = pte_mkclean(*i_ptep);
+			}
 
 			list_add_tail_rcu(&i_node->list_node, &local_free_list.head);
 			atomic_long_inc(&local_free_list.size);
