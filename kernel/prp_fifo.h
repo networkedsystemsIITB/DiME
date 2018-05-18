@@ -4,10 +4,8 @@
 #include "common.h"
 
 struct stats_struct {
-	ulong	pc_pagefaults;
-	ulong	an_pagefaults;
-
-	rwlock_t lock;
+	atomic_long_t	pc_pagefaults;
+	atomic_long_t	an_pagefaults;
 };
 
 struct prp_fifo_struct {

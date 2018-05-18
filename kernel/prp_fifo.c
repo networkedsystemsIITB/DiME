@@ -103,9 +103,9 @@ static ssize_t procfile_read(struct file *file, char *buffer, size_t length, lof
 			procfs_buffer_size += sprintf(procfs_buffer+procfs_buffer_size, 
 											//1  2     3
 											"%2d %11lu %11lu\n", 
-																		dime.dime_instances[i].instance_id,	// 1
-																		prp->stats.pc_pagefaults,			// 2
-																		prp->stats.an_pagefaults);			// 3
+																		dime.dime_instances[i].instance_id,				// 1
+																		atomic_long_read(&prp->stats.pc_pagefaults),	// 2
+																		atomic_long_read(&prp->stats.an_pagefaults));	// 3
 		}
 	}
 
@@ -129,11 +129,13 @@ static ssize_t procfile_write(struct file *file, const char *buffer, size_t leng
 
 int add_page(struct dime_instance_struct *dime_instance, struct pid * c_pid, ulong address) {
 	struct task_struct		* c_ts				= pid_task(c_pid, PIDTYPE_PID);
-	struct mm_struct		* c_mm				= c_ts->mm;
-	struct page				* c_page			= NULL;
+	struct mm_struct		* c_mm				= (c_ts == NULL ? NULL : c_ts->mm);
+	pte_t					* c_ptep			= (c_mm == NULL ? NULL : ml_get_ptep(c_mm, address));
+	struct page				* c_page			= (c_ptep == NULL ? NULL : pte_page(*c_ptep));
+
 	struct lpl_node_struct	* node_to_replace	= NULL;
 	struct prp_fifo_struct	* prp_fifo			= to_prp_fifo_struct(dime_instance->prp);
-	int ret_execute_delay = 0;
+	int 					ret_execute_delay 	= 0;
 
 	// if local page size is changed dynamically, delete extra nodes from the list
 	while (dime_instance->local_npages < prp_fifo->lpl_count) {
@@ -197,17 +199,12 @@ int add_page(struct dime_instance_struct *dime_instance, struct pid * c_pid, ulo
 	write_unlock(&prp_fifo->lock);
 
 
-	c_page = ml_get_page_sruct(c_mm, address);
 	if(c_page) {
 		if( ((unsigned long)(c_page->mapping) & (unsigned long)0x01) != 0 ) {
-			write_lock(&prp_fifo->stats.lock);
-			prp_fifo->stats.an_pagefaults++;
-			write_unlock(&prp_fifo->stats.lock);
+			atomic_long_inc(&prp_fifo->stats.an_pagefaults);
 			//DA_DEBUG("this is anonymous page: %lu, pid: %d", address, node->pid);
 		} else {
-			write_lock(&prp_fifo->stats.lock);
-			prp_fifo->stats.pc_pagefaults++;
-			write_unlock(&prp_fifo->stats.lock);
+			atomic_long_inc(&prp_fifo->stats.pc_pagefaults);
 			//DA_DEBUG("this is pagecache page: %lu, pid: %d", address, node->pid);
 		}
 	} else {
@@ -229,7 +226,6 @@ void lpl_Init(struct dime_instance_struct *dime_instance) {
 
 	prp_fifo->lpl_head = (struct list_head) { &(prp_fifo->lpl_head), &(prp_fifo->lpl_head) };
 	rwlock_init(&(prp_fifo->lock));
-	rwlock_init(&(prp_fifo->stats.lock));
 }
 
 
@@ -283,6 +279,7 @@ void cleanup_module(void) {
 	cleanup_dime_prp_config_procfs();
 
     for(i=0 ; i<dime.dime_instances_size ; ++i) {
+		dime.dime_instances[i].prp->add_page = NULL;
     	lpl_CleanList(&dime.dime_instances[i]);
 		dime.dime_instances[i].prp = NULL;
 	}
