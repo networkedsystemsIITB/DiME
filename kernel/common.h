@@ -52,6 +52,7 @@ struct lpl {
 extern struct dime_struct dime;
 
 
+void inject_delay(struct dime_instance_struct *dime_instance);
 int register_page_replacement_policy(struct page_replacement_policy_struct *prp);
 int deregister_page_replacement_policy(struct page_replacement_policy_struct *prp);
 

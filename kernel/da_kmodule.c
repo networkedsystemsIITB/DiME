@@ -133,6 +133,25 @@ struct dime_struct dime = {
     .dime_instances_size = 0
 };
 
+void inject_delay(struct dime_instance_struct *dime_instance) {
+    unsigned long long delay_ns = 0;
+    delay_ns = ((PAGE_SIZE * 8ULL) * 1000000000ULL) / dime_instance->bandwidth_bps;  // Transmission delay
+    delay_ns += 2*dime_instance->latency_ns;                                         // Two way latency
+
+    if(delay_ns < 100000) {                                     // use custome busy loop for < 100us
+        unsigned long long hook_timestamp = sched_clock();
+        while ((sched_clock() - hook_timestamp) < delay_ns) {
+            // Wait for delay
+        }
+    } else if(delay_ns < 20000000) {                            // use usleep_range for 100us to 20ms, since msleep minimum sleep is of 20ms
+        usleep_range(delay_ns/1000, delay_ns/1000 + 5);
+    } else {                                                    // use msleep for > 20ms
+        msleep(delay_ns / 1000000);
+    }
+}
+EXPORT_SYMBOL(inject_delay);
+
+
 /*****
  *
  *  init_module & cleanup_module
@@ -186,10 +205,13 @@ init_good:
     DA_EXIT();
     return ret;    // Non-zero return means that the module couldn't be loaded.
 }
+
+unsigned long long cycles = 0;
 void cleanup_module(void)
 {
     int i;
     DA_ENTRY();
+    DA_INFO("# OF CYCLES PER PF : %llu", cycles / dime.dime_instances[0].page_fault_count);
     cleanup_dime_config_procfs();
     // TODO:: Unprotect all pages before exiting
     HOOK_START_FN_NAME  = NULL; 
@@ -200,9 +222,10 @@ void cleanup_module(void)
             dime.dime_instances[i].prp->clean(&dime.dime_instances[i]);
     }
     cleanup_mm_lib();
-    DA_INFO("cleaning up module complete");
+    DA_INFO("cleaning up module complete : %llu", cycles);
     DA_EXIT();
 }
+
 
 
 /*  do_page_fault_hook_start_new
@@ -231,25 +254,18 @@ int do_page_fault_hook_end_new (struct pt_regs *regs,
                             unsigned long address,
                             int * hook_flag,
                             ulong * hook_timestamp) {
-    ulong delay_ns;
     struct dime_instance_struct *dime_instance = pt_get_dime_instance_of_pid(&dime, current->tgid);
 
     if(address != 0ul && dime_instance) {
         // Inject delays here
+        cycles += sched_clock() - *hook_timestamp;
 
         if(dime_instance->prp && dime_instance->prp->add_page && dime_instance->prp->add_page(dime_instance, task_pid(current), address) == 1) {
             write_lock(&dime_instance->lock);
             dime_instance->page_fault_count++;
             write_unlock(&dime_instance->lock);
 
-            delay_ns = 0;
-            delay_ns = ((PAGE_SIZE * 8ULL) * 1000000000ULL) / dime_instance->bandwidth_bps;  // Transmission delay
-            delay_ns += 2*dime_instance->latency_ns;                                         // Two way latency
-            *hook_timestamp = sched_clock();    // Do not subtract page fault handler time
-            while ((sched_clock() - *hook_timestamp) < delay_ns) {
-                // Wait for delay
-                //count++;
-            }
+            inject_delay(dime_instance);
         }
     }
 
