@@ -41,7 +41,7 @@ static ulong	free_list_max_size		= 4000ULL;
 
 module_param(kswapd_sleep_ms, int, 0644);
 module_param(free_list_max_size, ulong, 0644);
-#define MIN_FREE_PAGES_PERCENT 	10				// percentage of local memory available in free list
+#define MIN_FREE_PAGES_PERCENT 	20				// percentage of local memory available in free list
 
 MODULE_PARM_DESC(kswapd_sleep_ms, "Sleep time in ms of dime_kswapd thread");
 MODULE_PARM_DESC(free_list_max_size, "Max size of free list");
@@ -442,6 +442,7 @@ FREE_NODE_FOUND:
 	// TODO:: verify requirement of this
 	ml_set_accessed_pte(c_mm, c_addr, c_ptep);
 
+
 	if(c_page) {
 		if( ((unsigned long)(c_page->mapping) & (unsigned long)0x01) != 0 ) {
 			write_lock(&prp_lru->active_an.lock);
@@ -639,12 +640,7 @@ int try_to_free_pages(struct dime_instance_struct *dime_instance, struct lpl *pl
 			// inject delay if dirty page
 			if(pte_dirty(*i_ptep)) {
 				// emulate page flush, inject delay
-				ulong delay_ns = 0, start_time = sched_clock();
-				delay_ns = ((PAGE_SIZE * 8ULL) * 1000000000ULL) / dime_instance->bandwidth_bps;  // Transmission delay
-				delay_ns += 2*dime_instance->latency_ns;                                         // Two way latency
-				while ((sched_clock() - start_time) < delay_ns) {
-					// Wait for delay
-				}
+				inject_delay(dime_instance);
 
 				// clear dirty bit
 				*i_ptep = pte_mkclean(*i_ptep);
@@ -931,6 +927,7 @@ void cleanup_module(void) {
 	cleanup_dime_prp_config_procfs();
 
 	for(i=0 ; i<dime.dime_instances_size ; ++i) {
+		dime.dime_instances[i].prp->add_page = NULL;
 		lpl_CleanList(&dime.dime_instances[i]);
 		dime.dime_instances[i].prp = NULL;
 	}
