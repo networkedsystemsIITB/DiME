@@ -103,20 +103,18 @@ static ssize_t procfile_read(struct file *file, char *buffer, size_t length, lof
 		// offset is 0, so first call to read the file.
 		// Initialize buffer with config parameters currently set
 		int i;
-		//											 1  1A         1B            2           3           4         5        6         7        8         9          10        11         12        13         14         15          16         17          18        19         20        21         22        23        24        25	     26           27
-		procfs_buffer_size = sprintf(procfs_buffer, "id kswp_sleep free_max_size pc_pf_count an_pf_count free_size apc_size inpc_size aan_size inan_size free_evict apc_evict inpc_evict aan_evict inan_evict fapc_evict finpc_evict faan_evict finan_evict apc->free inpc->free aan->free inan->free apc->inpc inpc->apc aan->inan inan->aan inpc->apc_pf inan->aan_pf\n");
+		//											 1  1A         1B            4         5        6         7        8         9          10        11         12        13         14         15          16         17          18        19         20        21         22        23        24        25	     26           27
+		procfs_buffer_size = sprintf(procfs_buffer, "id kswp_sleep free_max_size free_size apc_size inpc_size aan_size inan_size free_evict apc_evict inpc_evict aan_evict inan_evict fapc_evict finpc_evict faan_evict finan_evict apc->free inpc->free aan->free inan->free apc->inpc inpc->apc aan->inan inan->aan inpc->apc_pf inan->aan_pf\n");
 		for(i=0 ; i<dime.dime_instances_size ; ++i) {
 			struct prp_lru_struct *prp = to_prp_lru_struct(dime.dime_instances[i].prp);
 			ulong free_list_size = (MIN_FREE_PAGES_PERCENT * dime.dime_instances[i].local_npages)/100;
 			free_list_size = free_list_size < free_list_max_size ? free_list_size : free_list_max_size;
 			procfs_buffer_size += sprintf(procfs_buffer+procfs_buffer_size, 
-											//1  1A   1B    2     3     4   5   6   7   8   9     10   11    12   13    14    15    16    17    18   19    20   21    22   23   24   25   26    27
-											"%2d %10d %13lu %11lu %11lu %9lu %8lu %9lu %8lu %9lu %10lu %9lu %10lu %9lu %10lu %10lu %11lu %10lu %11lu %9lu %10lu %9lu %10lu %9lu %9lu %9lu %9lu %12lu %12lu\n", 
+											//1  1A   1B       4   5   6   7    8    9     10   11    12   13    14    15    16    17    18   19    20   21    22   23   24   25   26    27
+											"%2d %10d %13lu %9lu %8lu %9lu %8lu %9lu %10lu %9lu %10lu %9lu %10lu %10lu %11lu %10lu %11lu %9lu %10lu %9lu %10lu %9lu %9lu %9lu %9lu %12lu %12lu\n", 
 																		dime.dime_instances[i].instance_id,						// 1
 																		kswapd_sleep_ms,										// 1A
 																		free_list_size,											// 1B
-																		atomic_long_read(&prp->stats.pc_pagefaults),			// 2
-																		atomic_long_read(&prp->stats.an_pagefaults),			// 3
 																		atomic_long_read(&prp->free.size),						// 4
 																		atomic_long_read(&prp->active_pc.size),					// 5
 																		atomic_long_read(&prp->inactive_pc.size),				// 6
@@ -450,14 +448,14 @@ FREE_NODE_FOUND:
 			atomic_long_inc(&prp_lru->active_an.size);
 			write_unlock(&prp_lru->active_an.lock);
 
-			atomic_long_inc(&prp_lru->stats.an_pagefaults);
+			atomic_long_inc(&dime_instance->an_pagefaults);
 		} else {
 			write_lock(&prp_lru->active_pc.lock);
 			list_add_tail_rcu(&(node_to_evict->list_node), &prp_lru->active_pc.head);
 			atomic_long_inc(&prp_lru->active_pc.size);
 			write_unlock(&prp_lru->active_pc.lock);
 
-			atomic_long_inc(&prp_lru->stats.pc_pagefaults);
+			atomic_long_inc(&dime_instance->pc_pagefaults);
 		}
 	} else {
 		DA_ERROR("invalid c_page mapping : %p : %p", c_page, c_page->mapping);

@@ -18,14 +18,16 @@ struct page_replacement_policy_struct {
 };
 
 struct dime_instance_struct {
-	int		instance_id;
-	int		pid[1000];
-	int		pid_count;
-	ulong	latency_ns;
-	ulong	bandwidth_bps;
-	ulong	local_npages;
-	ulong	page_fault_count;
-	rwlock_t lock;
+	int				instance_id;
+	int				pid[1000];
+	int				pid_count;
+	ulong			latency_ns;
+	ulong			bandwidth_bps;
+	ulong			local_npages;
+	atomic_long_t	pc_pagefaults;
+	atomic_long_t	an_pagefaults;
+	atomic_long_t	cpu_cycles_used;
+	rwlock_t 		lock;
 
 	struct page_replacement_policy_struct *prp;
 };

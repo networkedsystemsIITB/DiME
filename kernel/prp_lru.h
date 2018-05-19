@@ -27,9 +27,6 @@ struct stats_struct {
 	atomic_long_t	an_active_to_free_moved;
 	atomic_long_t	pc_inactive_to_free_moved;
 	atomic_long_t	an_inactive_to_free_moved;
-
-	atomic_long_t	pc_pagefaults;
-	atomic_long_t	an_pagefaults;
 };
 
 struct prp_lru_struct {

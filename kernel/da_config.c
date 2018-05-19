@@ -53,14 +53,22 @@ static ssize_t procfile_read(struct file *file, char *buffer, size_t length, lof
         // offset is 0, so first call to read the file.
         // Initialize buffer with config parameters currently set
         int i, j;
-        procfs_buffer_size = sprintf(procfs_buffer, "instance_id latency_ns bandwidth_bps local_npages page_fault_count pid\n");
+        procfs_buffer_size = sprintf(procfs_buffer, "instance_id latency_ns bandwidth_bps        local_npages page_fault_count pc_pagefaults an_pagefaults cpu_cycles_used cpu_per_pf pid\n");
         for(i=0 ; i<dime.dime_instances_size ; ++i) {
+            unsigned long long pc_pf        = atomic_long_read(&dime.dime_instances[i].pc_pagefaults);
+            unsigned long long an_pf        = atomic_long_read(&dime.dime_instances[i].an_pagefaults);
+            unsigned long long total_pf     = pc_pf + an_pf;
+            unsigned long long cpu_used     = atomic_long_read(&dime.dime_instances[i].cpu_cycles_used);
             procfs_buffer_size += sprintf(procfs_buffer+procfs_buffer_size, 
-                                            "%11d %10lu %13lu %12lu %16lu ", dime.dime_instances[i].instance_id,
+                                            "%11d %10lu %20lu %12lu %16llu %13llu %13llu %15llu %10llu ", dime.dime_instances[i].instance_id,
                                                                         dime.dime_instances[i].latency_ns,
                                                                         dime.dime_instances[i].bandwidth_bps,
                                                                         dime.dime_instances[i].local_npages,
-                                                                        dime.dime_instances[i].page_fault_count);
+                                                                        total_pf,
+                                                                        pc_pf,
+                                                                        an_pf,
+                                                                        cpu_used,
+                                                                        cpu_used / total_pf);
             for(j=0 ; j<dime.dime_instances[i].pid_count ; ++j) {
                 procfs_buffer_size += sprintf(procfs_buffer+procfs_buffer_size, "%d,", dime.dime_instances[i].pid[j]);
             }
@@ -229,9 +237,11 @@ static ssize_t procfile_write(struct file *file, const char *buffer, size_t leng
         dime.dime_instances[update_instance_id].latency_ns            = 10000ULL;
         dime.dime_instances[update_instance_id].bandwidth_bps         = 10000000000ULL;
         dime.dime_instances[update_instance_id].local_npages          = 20ULL;
-        dime.dime_instances[update_instance_id].page_fault_count      = 0ULL;
         dime.dime_instances[update_instance_id].pid_count             = 0;
         dime.dime_instances[update_instance_id].prp                   = NULL;
+        atomic_long_set(&dime.dime_instances[update_instance_id].pc_pagefaults, 0);
+        atomic_long_set(&dime.dime_instances[update_instance_id].an_pagefaults, 0);
+        atomic_long_set(&dime.dime_instances[update_instance_id].cpu_cycles_used, 0);
         dime.dime_instances_size                                      = update_instance_id+1;
         write_unlock(&dime.dime_instances[update_instance_id].lock);
     }
@@ -258,10 +268,6 @@ static ssize_t procfile_write(struct file *file, const char *buffer, size_t leng
 
     if(update_bandwidth_bps != -1) {
         dime.dime_instances[update_instance_id].bandwidth_bps = update_bandwidth_bps;
-    }
-
-    if(update_page_fault_count != -1) {
-        dime.dime_instances[update_instance_id].page_fault_count = update_page_fault_count;
     }
 
     return procfs_buffer_size;

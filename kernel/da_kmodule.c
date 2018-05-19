@@ -190,7 +190,9 @@ int init_module(void) {
     dime.dime_instances[0].latency_ns       = latency_ns;
     dime.dime_instances[0].bandwidth_bps    = bandwidth_bps;
     dime.dime_instances[0].local_npages     = local_npages;
-    dime.dime_instances[0].page_fault_count = page_fault_count;
+    atomic_long_set(&dime.dime_instances[0].pc_pagefaults, 0);
+    atomic_long_set(&dime.dime_instances[0].an_pagefaults, 0);
+    atomic_long_set(&dime.dime_instances[0].cpu_cycles_used, 0);
     dime.dime_instances_size                = 1;
 
     write_unlock(&(dime.dime_instances[0].lock));
@@ -206,12 +208,10 @@ init_good:
     return ret;    // Non-zero return means that the module couldn't be loaded.
 }
 
-unsigned long long cycles = 0;
 void cleanup_module(void)
 {
     int i;
     DA_ENTRY();
-    DA_INFO("# OF CYCLES PER PF : %llu", cycles / dime.dime_instances[0].page_fault_count);
     cleanup_dime_config_procfs();
     // TODO:: Unprotect all pages before exiting
     HOOK_START_FN_NAME  = NULL; 
@@ -222,7 +222,7 @@ void cleanup_module(void)
             dime.dime_instances[i].prp->clean(&dime.dime_instances[i]);
     }
     cleanup_mm_lib();
-    DA_INFO("cleaning up module complete : %llu", cycles);
+    DA_INFO("cleaning up module complete");
     DA_EXIT();
 }
 
@@ -255,16 +255,13 @@ int do_page_fault_hook_end_new (struct pt_regs *regs,
                             int * hook_flag,
                             ulong * hook_timestamp) {
     struct dime_instance_struct *dime_instance = pt_get_dime_instance_of_pid(&dime, current->tgid);
+    unsigned long long cycles = 0;
 
     if(address != 0ul && dime_instance) {
         // Inject delays here
         cycles += sched_clock() - *hook_timestamp;
-
+        atomic_long_add(cycles, &dime_instance->cpu_cycles_used);
         if(dime_instance->prp && dime_instance->prp->add_page && dime_instance->prp->add_page(dime_instance, task_pid(current), address) == 1) {
-            write_lock(&dime_instance->lock);
-            dime_instance->page_fault_count++;
-            write_unlock(&dime_instance->lock);
-
             inject_delay(dime_instance);
         }
     }

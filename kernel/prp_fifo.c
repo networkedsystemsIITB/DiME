@@ -96,16 +96,14 @@ static ssize_t procfile_read(struct file *file, char *buffer, size_t length, lof
 		// offset is 0, so first call to read the file.
 		// Initialize buffer with config parameters currently set
 		int i;
-		//											 1  2           3
-		procfs_buffer_size = sprintf(procfs_buffer, "id pc_pf_count an_pf_count\n");
+		//											 1
+		procfs_buffer_size = sprintf(procfs_buffer, "id \n");
 		for(i=0 ; i<dime.dime_instances_size ; ++i) {
-			struct prp_fifo_struct *prp = to_prp_fifo_struct(dime.dime_instances[i].prp);
+			//struct prp_fifo_struct *prp = to_prp_fifo_struct(dime.dime_instances[i].prp);
 			procfs_buffer_size += sprintf(procfs_buffer+procfs_buffer_size, 
-											//1  2     3
-											"%2d %11lu %11lu\n", 
-																		dime.dime_instances[i].instance_id,				// 1
-																		atomic_long_read(&prp->stats.pc_pagefaults),	// 2
-																		atomic_long_read(&prp->stats.an_pagefaults));	// 3
+											//1
+											"%2d \n", 
+																		dime.dime_instances[i].instance_id);				// 1
 		}
 	}
 
@@ -201,10 +199,10 @@ int add_page(struct dime_instance_struct *dime_instance, struct pid * c_pid, ulo
 
 	if(c_page) {
 		if( ((unsigned long)(c_page->mapping) & (unsigned long)0x01) != 0 ) {
-			atomic_long_inc(&prp_fifo->stats.an_pagefaults);
+			atomic_long_inc(&dime_instance->an_pagefaults);
 			//DA_DEBUG("this is anonymous page: %lu, pid: %d", address, node->pid);
 		} else {
-			atomic_long_inc(&prp_fifo->stats.pc_pagefaults);
+			atomic_long_inc(&dime_instance->pc_pagefaults);
 			//DA_DEBUG("this is pagecache page: %lu, pid: %d", address, node->pid);
 		}
 	} else {
