@@ -323,7 +323,6 @@ int ml_is_dirty(struct mm_struct *mm, ulong address) {
 EXPORT_SYMBOL(ml_is_dirty);
 
 
-//////////////////////////////////////////////////////////////////////////////////////////// use pte_young & pte_old macros
 int ml_is_accessed(struct mm_struct *mm, ulong address) {
 	pte_t* ptep = ml_get_ptep(mm, address);
 	if(ptep) {
@@ -337,6 +336,16 @@ int ml_is_accessed(struct mm_struct *mm, ulong address) {
 	return 0;			// Failure
 }
 EXPORT_SYMBOL(ml_is_accessed);
+
+int ml_is_inlist_pte(struct mm_struct *mm, ulong address, pte_t *ptep) {
+	if(ptep &&
+		pte_present(*ptep) && 					// if pte is not present, page is definitely not in local list
+		(pte_flags(*ptep) & _PAGE_SOFTW2)) {	// Check if page fault IS induced by us
+		return 1;   // Success
+	}
+	return 0;           // Failure
+}
+EXPORT_SYMBOL(ml_is_inlist_pte);
 
 int ml_is_inlist(struct mm_struct *mm, ulong address) {
 	pte_t* ptep = ml_get_ptep(mm, address);
@@ -352,6 +361,16 @@ int ml_is_inlist(struct mm_struct *mm, ulong address) {
 	return 0;           // Failure
 }
 
+int ml_set_inlist_pte(struct mm_struct *mm, ulong address, pte_t *ptep) {
+	if(ptep && pte_present(*ptep)) {
+		set_pte( ptep , pte_set_flags(*ptep, _PAGE_SOFTW2) );
+		return 1;   // Success
+	}
+
+	return 0;       // Failure
+}
+EXPORT_SYMBOL(ml_set_inlist_pte);
+
 int ml_set_inlist(struct mm_struct *mm, ulong address) {
 	pte_t* ptep = ml_get_ptep(mm, address);
 	if(ptep && pte_present(*ptep)) {
@@ -361,6 +380,16 @@ int ml_set_inlist(struct mm_struct *mm, ulong address) {
 
 	return 0;       // Failure
 }
+
+int ml_reset_inlist_pte(struct mm_struct *mm, ulong address, pte_t* ptep) {
+	if(ptep && pte_present(*ptep)) {
+		set_pte( ptep , pte_clear_flags(*ptep, _PAGE_SOFTW2) );
+		return 1;   // Success
+	}
+	
+	return 0;           // Failure
+}
+EXPORT_SYMBOL(ml_reset_inlist_pte);
 
 int ml_reset_inlist(struct mm_struct *mm, ulong address) {
 	pte_t* ptep = ml_get_ptep(mm, address);

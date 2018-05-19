@@ -35,8 +35,11 @@ int ml_is_present(struct mm_struct *mm, ulong address);
 int ml_is_dirty(struct mm_struct *mm, ulong address);
 int ml_is_accessed(struct mm_struct *mm, ulong address);
 
+int ml_is_inlist_pte(struct mm_struct *mm, ulong address, pte_t *ptep);
 int ml_is_inlist(struct mm_struct *mm, ulong address);
+int ml_set_inlist_pte(struct mm_struct *mm, ulong address, pte_t *ptep);
 int ml_set_inlist(struct mm_struct *mm, ulong address);
+int ml_reset_inlist_pte(struct mm_struct *mm, ulong address, pte_t* ptep);
 int ml_reset_inlist(struct mm_struct *mm, ulong address);
 
 struct task_struct * ml_get_task_struct(pid_t pid);
