@@ -7,7 +7,7 @@ struct prp_fifo_struct {
 	struct page_replacement_policy_struct prp;
 
 	struct list_head lpl_head;
-	ulong lpl_count;
+	atomic_long_t lpl_count;
 	
 	rwlock_t lock;
 };
