@@ -159,6 +159,7 @@ int ml_protect_pte(struct mm_struct *mm, ulong address, pte_t *ptep) {
 
 	if(ptep && pte_present(*ptep)) {		// TODO:: why check if present
 		// Protect page "address"
+		set_pte( ptep , pte_clear_flags(*ptep, _PAGE_SOFTW2) ); // Reset inlist flag
 		set_pte( ptep , pte_clear_flags(*ptep, _PAGE_PRESENT) );
 		set_pte( ptep , pte_set_flags(*ptep, _PAGE_PROTNONE) );
 
