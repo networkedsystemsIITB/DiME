@@ -193,6 +193,7 @@ int init_module(void) {
     atomic_long_set(&dime.dime_instances[0].pc_pagefaults, 0);
     atomic_long_set(&dime.dime_instances[0].an_pagefaults, 0);
     atomic_long_set(&dime.dime_instances[0].cpu_cycles_used, 0);
+    atomic_long_set(&dime.dime_instances[0].duplecate_pfs, 0);
     dime.dime_instances_size                = 1;
 
     write_unlock(&(dime.dime_instances[0].lock));
@@ -238,8 +239,18 @@ int do_page_fault_hook_start_new (struct pt_regs *regs,
                             unsigned long address,
                             int * hook_flag,
                             ulong * hook_timestamp) {
+    struct dime_instance_struct *dime_instance = pt_get_dime_instance_of_pid(&dime, current->tgid);
+
     *hook_flag = 0;
     *hook_timestamp = sched_clock();
+
+    if(address != 0ul && dime_instance) {
+        // Inject delays here
+        pte_t *ptep = ml_get_ptep(current->mm, address);
+        if(ml_is_inlist_pte(current->mm, address, ptep)) {
+            atomic_long_inc(&dime_instance->duplecate_pfs);
+        }
+    }
 
     return 0;
 }
@@ -259,9 +270,9 @@ int do_page_fault_hook_end_new (struct pt_regs *regs,
 
     if(address != 0ul && dime_instance) {
         // Inject delays here
-        cycles += sched_clock() - *hook_timestamp;
-        atomic_long_add(cycles, &dime_instance->cpu_cycles_used);
         if(dime_instance->prp && dime_instance->prp->add_page && dime_instance->prp->add_page(dime_instance, task_pid(current), address) == 1) {
+            cycles += sched_clock() - *hook_timestamp;
+            atomic_long_add(cycles, &dime_instance->cpu_cycles_used);
             inject_delay(dime_instance);
         }
     }

@@ -9,7 +9,20 @@
 
 
 #define MAX_DIME_INSTANCES 50
+/*
+struct pagefault_request {
+	unsigned long 					address;
+	struct pid 						* pid;
+	struct task_struct				* ts;
+	struct mm_struct				* mm;
+	pte_t							* ptep;
+	struct page						* page;
+	struct dime_instance_struct 	* dime_instance;
 
+	unsigned long long 				timestamp;
+	bool 							inject_delay;
+};
+*/
 struct dime_instance_struct;
 
 struct page_replacement_policy_struct {
@@ -27,6 +40,7 @@ struct dime_instance_struct {
 	atomic_long_t	pc_pagefaults;
 	atomic_long_t	an_pagefaults;
 	atomic_long_t	cpu_cycles_used;
+	atomic_long_t	duplecate_pfs;
 	rwlock_t 		lock;
 
 	struct page_replacement_policy_struct *prp;
