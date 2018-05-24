@@ -4,9 +4,10 @@ CONFIG_DEBUG_INFO=y
 
 EXTRA_CFLAGS := -I./
 
-obj-m += kmodule.o prp_fifo_module.o prp_lru_module.o 
+obj-m += kmodule.o prp_fifo_module.o prp_lru_module.o prp_random_module.o
 prp_fifo_module-objs += prp_fifo.o
 prp_lru_module-objs += prp_lru.o
+prp_random_module-objs += prp_random.o
 kmodule-objs += da_mem_lib.o da_kmodule.o da_ptracker.o da_config.o
 
 all:

@@ -55,6 +55,7 @@ struct lpl_node_struct {
 	struct list_head list_node;
 	ulong address;
 	struct pid *pid_s;
+	spinlock_t lock;
 };
 
 // local page list struct
