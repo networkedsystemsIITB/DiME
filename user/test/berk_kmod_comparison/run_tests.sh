@@ -17,25 +17,32 @@ function reboot_server {
 	ssh root@$server_ip "dmesg -c" > /dev/null
 }
 
-function resetup_everything {
-	reboot_server
-
+function stop_services {
 	ssh root@$server_ip "
-		service redis stop;
 		service memcached stop;
 		service memcached_server1 stop;
 		service memcached_server2 stop;
 		service redis1 stop;
 		service redis2 stop;
+		service redis stop;"
+}
+
+function start_services {
+	ssh root@$server_ip "
 		echo never > /sys/kernel/mm/transparent_hugepage/enabled;
-		sync;
-		echo 3 > /proc/sys/vm/drop_caches;
-		sleep 2;
 		service redis1 start;
 		service redis2 start;
 		service memcached_server1 start;
-		service memcached_server2 start || exit 1
-	" || exit 1
+		service memcached_server2 start
+		sync;
+		echo 3 > /proc/sys/vm/drop_caches;"
+}
+
+function resetup_everything {
+	reboot_server
+
+	stop_services
+	start_services
 	kmod_remove_module
 	berk_remove_module
 	sleep 2
@@ -80,7 +87,7 @@ function kmod_insert_module {
 	elif [ $test_mode = separate ]; then
 		pid=$instance1_pid
 		pid1=$instance2_pid
-	fi &&
+	fi
 
 
 	# pin process threads to CPU cores
@@ -89,17 +96,19 @@ function kmod_insert_module {
 	for pinpid in `ssh root@$server_ip "ps -p $instance1_pid -o tid= -L | sort -n"`; do
 		echo "Pinning process1 $process1 : $instance1_pid thread $pinpid to CPU $cpuid";
 		ssh root@$server_ip "taskset -pc $cpuid $pinpid";
-		cpuid=$((cpuid+1));			######### pin all process threads to single cpu
-		cpuid=$((cpuid%cpus));
+		#cpuid=$((cpuid+1));			######### pin all process threads to single cpu
+		#cpuid=$((cpuid%cpus));
 	done;
-#	cpuid=$((cpuid+1));
-#	cpuid=$((cpuid%cpus));
+	cpuid=$((cpuid+1));
+	cpuid=$((cpuid%cpus));
 
 
 	if [ "$enable_module" == "kmod_fifo" ]; then
 		kmod_prp_path_on_server=$kmod_prp_fifo_path_on_server
 	elif [ "$enable_module" == "kmod_lru" ]; then
 		kmod_prp_path_on_server=$kmod_prp_lru_path_on_server
+	elif [ "$enable_module" == "kmod_random" ]; then
+		kmod_prp_path_on_server=$kmod_prp_random_path_on_server
 	fi
 
 
@@ -115,13 +124,14 @@ function kmod_insert_module {
 	" || exit 1
 
 
+	echo "Inserting module $enable_module : kswapd_sleep_ms=$kmod_kswapd_sleep_ms free_list_max_size=$kmod_free_list_max_size"
 	if [ "$enable_module" == "kmod_lru" ]; then
 		ssh root@$server_ip "insmod $kmod_prp_path_on_server kswapd_sleep_ms=$kmod_kswapd_sleep_ms free_list_max_size=$kmod_free_list_max_size || exit 2;" || exit 1
 		# pin kswapd thread to next CPU
 		dime_kswapd_pid=`ssh root@$server_ip "ps aux | grep dime_kswapd | grep -v grep | head -n1 | sed 's/[ \t]\+/\t/g' | cut -f 2"`
 		echo "Pinning kswapd thread $dime_kswapd_pid to CPU $cpuid";
 		ssh root@$server_ip "taskset -pc $cpuid $dime_kswapd_pid";
-	elif [ "$enable_module" == "kmod_fifo" ]; then
+	elif [ "$enable_module" == "kmod_fifo" -o "$enable_module" == "kmod_random" ]; then
 		ssh root@$server_ip "insmod $kmod_prp_path_on_server || exit 2;" || exit 1
 	fi
 }
@@ -157,10 +167,8 @@ function berk_insert_module {
 function redis_load {
 	if [ "$1" == "1" ]; then
 		server_port=$redis_instance1_port
-		redis_workload_config=$redis_short_workload_config
 	elif [ "$1" == "2" ]; then
 		server_port=$redis_instance2_port
-		redis_workload_config=$redis_short_workload_config
 	fi
 
 	if [ $bench_tool = ycsb ]; then
@@ -182,16 +190,14 @@ function redis_load {
 function memcached_load {
 	if [ "$1" == "1" ]; then
 		server_port=$memcached_instance1_port
-		workload_config=$redis_short_workload_config
 	elif [ "$1" == "2" ]; then
 		server_port=$memcached_instance2_port
-		workload_config=$redis_short_workload_config
 	fi
 
 	if [ $bench_tool = ycsb ]; then
 		pushd $ycsb_home > /dev/null
 			./bin/ycsb load memcached -s \
-				-P $workload_config \
+				-P $memcached_workload_config \
 				-p "memcached.hosts=${server_ip}:${server_port}" \
 				-threads $client_threads
 		popd > /dev/null
@@ -206,10 +212,8 @@ function memcached_load {
 function redis_run {
 	if [ "$1" == "1" ]; then
 		server_port=$redis_instance1_port
-		redis_workload_config=$redis_short_workload_config
 	elif [ "$1" == "2" ]; then
 		server_port=$redis_instance2_port
-		redis_workload_config=$redis_short_workload_config
 	fi
 
 	if [ $bench_tool = ycsb ]; then
@@ -221,7 +225,7 @@ function redis_run {
 				-threads $client_threads
 		popd > /dev/null
 	elif [ $bench_tool = memtier ]; then
-		memtier_benchmark -s ${server_ip} -p ${server_port} -P redis -n $(($workload_b  / $client_threads / $clients_per_thread)) -c $clients_per_thread -t $client_threads --ratio 50:50 -d 1000 --key-maximum=$workload_b --key-pattern=G:G --key-stddev=$(($workload_b / 2)) --hide-histogram
+		memtier_benchmark -s ${server_ip} -p ${server_port} -P redis -n $(($workload_b_run  / $client_threads / $clients_per_thread)) -c $clients_per_thread -t $client_threads --ratio 50:50 -d 1000 --key-maximum=$workload_b --key-pattern=G:G --hide-histogram # --key-stddev=$(($workload_b))
 	fi
 }
 
@@ -231,21 +235,19 @@ function redis_run {
 function memcached_run {
 	if [ "$1" == "1" ]; then
 		server_port=$memcached_instance1_port
-		workload_config=$redis_short_workload_config
 	elif [ "$1" == "2" ]; then
 		server_port=$memcached_instance2_port
-		workload_config=$redis_short_workload_config
 	fi
 
 	if [ $bench_tool = ycsb ]; then
 		pushd $ycsb_home > /dev/null
 			./bin/ycsb run memcached -s \
-				-P $workload_config \
+				-P $memcached_workload_config \
 				-p "memcached.hosts=${server_ip}:${server_port}" \
 				-threads $client_threads
 		popd > /dev/null
 	elif [ $bench_tool = memtier ]; then
-		memtier_benchmark -s ${server_ip} -p ${server_port} -P memcache_binary -n $(($workload_b / $client_threads / $clients_per_thread)) -c $clients_per_thread -t $client_threads --ratio 50:50 -d 1000 --key-maximum=$workload_b --key-pattern=G:G --key-stddev=$(($workload_b / 2)) --hide-histogram
+		memtier_benchmark -s ${server_ip} -p ${server_port} -P memcache_binary -n $(($workload_b_run / $client_threads / $clients_per_thread)) -c $clients_per_thread -t $client_threads --ratio 50:50 -d 1000 --key-maximum=$workload_b --key-pattern=G:G --hide-histogram #--key-stddev=$(($workload_b)) 
 	fi
 }
 
@@ -295,6 +297,12 @@ function run_process {
 }
 
 function run_processes {
+	kmod_remove_module
+	berk_remove_module
+	stop_services
+	start_services
+	sleep 2
+
 	pushd $ycsb_home > /dev/null
 		# load data to both redis and memcached
 		if [ ! $test_mode = single ]
@@ -307,12 +315,17 @@ function run_processes {
 
 		wait	# wait for loading
 
-		kmod_get_module_stats >> ${testfile_prefix}-instance-1-load.log
+		#echo "Module has been inserted, press ENTER after starting stab probe";
+		#read -r
 
-		if [ "$enable_module" == "kmod_fifo" -o "$enable_module" == "kmod_lru" ]; then
+		kmod_insert_module
+
+		kmod_get_module_stats >> ${testfile_prefix}-instance-1-load.log
+		if [ "$enable_module" == "kmod_fifo" -o "$enable_module" == "kmod_lru" -o "$enable_module" == "kmod_random" ]; then
 			ssh root@$server_ip "cat /proc/dime_config" > ${testfile_prefix}-load-kmod_stats.log
 			ssh root@$server_ip "cat /proc/dime_prp_config" > ${testfile_prefix}-load-kmod_prp_stats.log
 		fi
+
 
 		if [ ! $test_mode = single ]
 		then
@@ -328,22 +341,21 @@ function run_processes {
 
 		kmod_get_module_stats >> ${testfile_prefix}-instance-1-run.log
 
-		if [ "$enable_module" == "kmod_fifo" -o "$enable_module" == "kmod_lru" ]; then
+		if [ "$enable_module" == "kmod_fifo" -o "$enable_module" == "kmod_lru" -o "$enable_module" == "kmod_random" ]; then
 			ssh root@$server_ip "cat /proc/dime_config" > ${testfile_prefix}-run-kmod_stats.log
 			ssh root@$server_ip "cat /proc/dime_prp_config" > ${testfile_prefix}-run-kmod_prp_stats.log
 		fi
 
-		ssh root@$server_ip "dmesg -c" > ${testfile_prefix}-dmesg.log
-		
 	popd > /dev/null
+
+	kmod_remove_module
+	ssh root@$server_ip "dmesg -c" > ${testfile_prefix}-dmesg.log
+
+	#echo "DONE, stop stap";
+	#read -r
 }
 
 function run_test {
-
-	resetup_everything
-
-	kmod_insert_module	# insert kmod to count pagefaults
-
 	percent_local_mem=$(echo "4 * $kmod_local_npages * 100 / $workload_b" | bc);
 	if [ $test_mode = shared ]; then
 		percent_local_mem=$(($percent_local_mem / 2))
@@ -370,6 +382,12 @@ function run_test {
 		fi
 		berk_remove_module
 		testname="${testname}-plocal-${percent_local_mem}-local-${kmod_local_npages}-latency-${kmod_latency_ns}-bandwidth-${kmod_bandwidth_bps}-ksleep-FIFO-free_size-FIFO"
+	elif [ "$enable_module" == "kmod_random" ]; then
+		if [ $test_mode = shared ]; then
+			percent_local_mem=$(($percent_local_mem / 2))
+		fi
+		berk_remove_module
+		testname="${testname}-plocal-${percent_local_mem}-local-${kmod_local_npages}-latency-${kmod_latency_ns}-bandwidth-${kmod_bandwidth_bps}-ksleep-RAND-free_size-RAND"
 	elif [ "$enable_module" == "berk" ]; then
 		percent_local_mem=$(echo "(7.6 - $berk_remote_memory_gb)*100" | bc | cut -d. -f1);
 		if [ $test_mode = shared ]; then
@@ -380,9 +398,6 @@ function run_test {
 	fi
 
 	testfile_prefix=$curdir/$testname
-
-	#echo "Module has been inserted, press ENTER after starting stab probe";
-	#read -r
 
 	run_processes
 }
@@ -405,8 +420,9 @@ ycsb_home=/root/ycsb
 kmod_path_on_server="/root/DiME/kernel/kmodule.ko"
 kmod_prp_fifo_path_on_server="/root/DiME/kernel/prp_fifo_module.ko"
 kmod_prp_lru_path_on_server="/root/DiME/kernel/prp_lru_module.ko"
-redis_short_workload_config="${ycsb_home}/workloads/workloada_r"
-redis_long_workload_config="${ycsb_home}/workloads/workloada_r"
+kmod_prp_random_path_on_server="/root/DiME/kernel/prp_random_module.ko"
+redis_workload_config="${ycsb_home}/workloads/workloada_r"
+memcached_workload_config="${ycsb_home}/workloads/workloada_m"
 #kmod_process_in_module="redis1"	# shared/separate/redis1/redis2
 redis_instance1_port=6381
 redis_instance2_port=6382
@@ -417,63 +433,74 @@ process2="memcached"
 test_mode="single"		# shared/separate/single/multisingle
 enable_module="no"		# kmod_lru kmod_fifo
 
-workload_b=4000000		# number of 1000b records
+workload_b=6000000		# number of 1000b records
+workload_b_run=20000000	# number of 1000b records
 
-client_threads=80
-clients_per_thread=20
+client_threads=100
+clients_per_thread=50
 bench_tool="ycsb"	# memtier ycsb
 
 
-# 7.6G available memory
-function run_single_test {
-	# kmodule parameterss
-	kmod_latency_ns=2500
-	kmod_bandwidth_bps=100000000000
-	kmod_local_npages=1000000000
-	kmod_kswapd_sleep_ms=1
-	kmod_free_list_max_size=4000
+# kmodule parameterss
+kmod_latency_ns=2500
+kmod_bandwidth_bps=100000000000
+kmod_local_npages=1000000000
+kmod_kswapd_sleep_ms=1
+kmod_free_list_max_size=4000
 
 
-	for kmod_latency_ns in 2500 7500 10000 50000; #20000 80000 150000; # 2500 7000  #40000 60000 100000 150000 200000;
+for kmod_latency_ns in 2500;
+do
+	for testcase in {1..10};
 	do
-		for kmod_local_npages in 50000 150000 250000; # 150000 250000; # 100000 150000; #25000 50000 75000 100000 125000 150000; # 10 20 30 40 50 60
+		for process1 in "redis" "memcached";
 		do
-			temp_local_npages=$kmod_local_npages;
-			for test_mode in "single"; #"separate" "shared"; ###############################################"separate" "shared" "multisingle";
+			for bench_tool in "ycsb"; # "memtier"; #"ycsb" 
 			do
-				if [ "$test_mode" == "shared" ];
+				if [ $bench_tool = memtier ];
 				then
-					kmod_local_npages=$((temp_local_npages*2));
+					client_threads=9;
+					clients_per_thread=50;
 				else
-					kmod_local_npages=$temp_local_npages;
+					client_threads=100;
+					clients_per_thread=50;
 				fi
 
-
-				for enable_module in "kmod_fifo";
+				for kmod_local_npages in 150000;
 				do
-					run_test
-				done
-
-				
-				for kmod_free_list_max_size in 6400; #25600 100 1600;
-				do
-					if [ $kmod_local_npages -lt $((kmod_free_list_max_size * 10)) ]
-					then
-						echo "NOT SKIPPING"
-						#continue;
-					fi
-
-					for kmod_kswapd_sleep_ms in 64; #1 16 64 256 512;
+					temp_local_npages=$kmod_local_npages;
+					for test_mode in "single"; #"separate" "shared";
 					do
-						for enable_module in "kmod_lru";
+						if [ "$test_mode" == "shared" ];
+						then
+							kmod_local_npages=$((temp_local_npages*2));
+						else
+							kmod_local_npages=$temp_local_npages;
+						fi
+
+
+						for enable_module in "kmod_random" "kmod_fifo";
 						do
 							run_test
+						done
+
+						
+						for kmod_free_list_max_size in 15000; #25600 100 1600;
+						do
+							for kmod_kswapd_sleep_ms in 64; #1 16 64 256 512;
+							do
+								for enable_module in "kmod_lru";
+								do
+									run_test
+								done
+							done
 						done
 					done
 				done
 			done
 		done
 	done
+done
 	
 
 
@@ -508,17 +535,3 @@ function run_single_test {
 #		echo "doing nothing"
 #		run_test
 #	done
-
-}
-
-
-# run tests:
-for testcase in {1..10};
-do
-	#exec 3>"$HOSTDIR/$HOST.comb" 2> >(tee "$HOSTDIR/$HOST.err" >&3) 1> >(tee "$HOSTDIR/$HOST.out" >&3);
-	run_single_test #3>"test-${testcase}.comb" 2> >(tee "test-${testcase}.err" >&3) 1> >(tee "test-${testcase}.out" >&3);
-done
-
-
-
-
