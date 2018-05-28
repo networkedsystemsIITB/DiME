@@ -4,7 +4,6 @@
 #include <linux/syscalls.h>
 #include <linux/sched.h>
 #include <linux/delay.h>
-#include <asm/paravirt.h>
 #include <asm/processor.h>
 #include <asm/pgtable.h>
 #include <linux/stat.h>
@@ -18,6 +17,7 @@
 #include "da_mem_lib.h"
 
 void (*flush_tlb_mm_range_fp) (struct mm_struct *, unsigned long, unsigned long, unsigned long) = NULL;
+EXPORT_SYMBOL(flush_tlb_mm_range_fp);
 
 int init_mem_lib (void) {
 	unsigned long fp = 0;
@@ -29,13 +29,11 @@ int init_mem_lib (void) {
 		DA_ERROR("could not find symbol flush_tlb_mm_range");
 		flush_tlb_mm_range_fp = NULL;
 		ret = -1;  // TODO:: Error codes
-		goto INIT_EXIT;
 	} else {
 		flush_tlb_mm_range_fp = (void (*) (struct mm_struct *, unsigned long, unsigned long, unsigned long))fp;
 		DA_INFO("registered flush_tlb_mm_range function pointer :%p", flush_tlb_mm_range_fp);
 	}
 
-INIT_EXIT:
 	DA_EXIT();
 	return ret;
 }
@@ -44,19 +42,8 @@ int cleanup_mm_lib (void) {
 	DA_ENTRY();
 	DA_INFO("deregistering flush_tlb_mm_range function pointer :%p", flush_tlb_mm_range_fp);
 	flush_tlb_mm_range_fp = NULL;
-	DA_INFO("deregistered flush_tlb_mm_range function pointer :%p", flush_tlb_mm_range_fp);
 	DA_EXIT();
 	return 0;
-}
-// Function pointer to flush_tlb_page function. Since it is not exported symbol,
-// it has to be extracted using kallsyms_lookup_name function.
-void flush_tlb_page(struct vm_area_struct * vma, unsigned long a) {
-	//DA_ENTRY();
-	if(flush_tlb_mm_range_fp)
-		flush_tlb_mm_range_fp(vma->vm_mm, a, a + PAGE_SIZE, VM_NONE);
-	else
-		DA_WARNING("flush_tlb_mm_range_fp is NULL, not flushing :%p", flush_tlb_mm_range_fp);
-	//DA_EXIT();
 }
 
 /*  get_ptep
@@ -116,7 +103,7 @@ EXIT:
 	return pte;
 }
 EXPORT_SYMBOL(ml_get_ptep);
-
+/*
 struct page *ml_get_page_sruct(struct mm_struct *mm, unsigned long virt) {
 	pte_t *ptep = ml_get_ptep(mm, virt);
 	struct page * page = NULL;
@@ -126,7 +113,7 @@ struct page *ml_get_page_sruct(struct mm_struct *mm, unsigned long virt) {
 	return page;
 }
 EXPORT_SYMBOL(ml_get_page_sruct);
-
+*/
 
  
 /*  protect_pages
@@ -153,35 +140,7 @@ void ml_protect_all_pages(struct mm_struct * mm) {
 }
 EXPORT_SYMBOL(ml_protect_all_pages);
 
-
-int ml_protect_pte(struct mm_struct *mm, ulong address, pte_t *ptep) {
-	struct vm_area_struct *vma = NULL;
-
-	if(ptep && pte_present(*ptep)) {		// TODO:: why check if present
-		// Protect page "address"
-		set_pte( ptep , pte_clear_flags(*ptep, _PAGE_SOFTW2) ); // Reset inlist flag
-		set_pte( ptep , pte_clear_flags(*ptep, _PAGE_PRESENT) );
-		set_pte( ptep , pte_set_flags(*ptep, _PAGE_PROTNONE) );
-
-		vma = find_vma(mm, address);
-		if(vma == NULL || address >= vma->vm_end)
-			DA_WARNING("could not find vma for address: %lu", address);
-		else //if(flush_tlb_page!=NULL)
-			flush_tlb_page(vma, address);
-
-		return 1;	// Success
-	}
-
-	return 0;		// Failure
-}
-EXPORT_SYMBOL(ml_protect_pte);
-
-int ml_protect_page(struct mm_struct *mm, ulong address) {
-	pte_t* ptep = ml_get_ptep(mm, address);
-	return ml_protect_pte(mm, address, ptep);
-}
-EXPORT_SYMBOL(ml_protect_page);
-
+/*
 int ml_unprotect_page(struct mm_struct *mm, ulong address) {
 	pte_t* ptep = ml_get_ptep(mm, address);
 	if(ptep && pte_present(*ptep)) {
@@ -210,17 +169,12 @@ int ml_clear_accessed_pte(struct mm_struct *mm, ulong address, pte_t* ptep) {
 EXPORT_SYMBOL(ml_clear_accessed_pte);
 
 int ml_clear_accessed(struct mm_struct *mm, ulong address) {
-	struct vm_area_struct *vma = NULL;
 	pte_t* ptep = ml_get_ptep(mm, address);
 	if(ptep && pte_present(*ptep)) {		// TODO:: why check if present
 		// Protect page "address"
 		set_pte( ptep , pte_clear_flags(*ptep, _PAGE_ACCESSED) );
 
-		vma = find_vma(mm, address);
-		if(vma == NULL || address >= vma->vm_end)
-			DA_WARNING("could not find vma for address: %lu", address);
-		else //if(flush_tlb_page_fp!=NULL)
-			flush_tlb_page(vma, address);
+		flush_tlb_page(mm, address);
 
 		return 1;	// Success
 	}
@@ -242,16 +196,11 @@ int ml_set_accessed_pte(struct mm_struct *mm, ulong address, pte_t* ptep) {
 EXPORT_SYMBOL(ml_set_accessed_pte);
 
 int ml_set_accessed(struct mm_struct *mm, ulong address) {
-	struct vm_area_struct *vma = NULL;
 	pte_t* ptep = ml_get_ptep(mm, address);
 	if(ptep && pte_present(*ptep)) {		// TODO:: why check if present
 		*ptep = pte_mkyoung(*ptep);
 
-		vma = find_vma(mm, address);
-		if(vma == NULL || address >= vma->vm_end)
-			DA_WARNING("could not find vma for address: %lu", address);
-		else //if(flush_tlb_page_fp!=NULL)
-			flush_tlb_page(vma, address);
+		flush_tlb_page(mm, address);
 
 		return 1;	// Success
 	}
@@ -261,16 +210,11 @@ int ml_set_accessed(struct mm_struct *mm, ulong address) {
 EXPORT_SYMBOL(ml_set_accessed);
 
 int ml_clear_dirty(struct mm_struct *mm, ulong address) {
-	struct vm_area_struct *vma = NULL;
 	pte_t* ptep = ml_get_ptep(mm, address);
 	if(ptep && pte_present(*ptep)) {		// TODO:: why check if present
 		*ptep = pte_mkclean(*ptep);
 
-		vma = find_vma(mm, address);
-		if(vma == NULL || address >= vma->vm_end)
-			DA_WARNING("could not find vma for address: %lu", address);
-		else //if(flush_tlb_page_fp!=NULL)
-			flush_tlb_page(vma, address);
+		flush_tlb_page(mm, address);
 
 		return 1;	// Success
 	}
@@ -338,16 +282,6 @@ int ml_is_accessed(struct mm_struct *mm, ulong address) {
 }
 EXPORT_SYMBOL(ml_is_accessed);
 
-int ml_is_inlist_pte(struct mm_struct *mm, ulong address, pte_t *ptep) {
-	if(ptep &&
-		pte_present(*ptep) && 					// if pte is not present, page is definitely not in local list
-		(pte_flags(*ptep) & _PAGE_SOFTW2)) {	// Check if page fault IS induced by us
-		return 1;   // Success
-	}
-	return 0;           // Failure
-}
-EXPORT_SYMBOL(ml_is_inlist_pte);
-
 int ml_is_inlist(struct mm_struct *mm, ulong address) {
 	pte_t* ptep = ml_get_ptep(mm, address);
 	if(ptep) {
@@ -362,16 +296,6 @@ int ml_is_inlist(struct mm_struct *mm, ulong address) {
 	return 0;           // Failure
 }
 
-int ml_set_inlist_pte(struct mm_struct *mm, ulong address, pte_t *ptep) {
-	if(ptep && pte_present(*ptep)) {
-		set_pte( ptep , pte_set_flags(*ptep, _PAGE_SOFTW2) );
-		return 1;   // Success
-	}
-
-	return 0;       // Failure
-}
-EXPORT_SYMBOL(ml_set_inlist_pte);
-
 int ml_set_inlist(struct mm_struct *mm, ulong address) {
 	pte_t* ptep = ml_get_ptep(mm, address);
 	if(ptep && pte_present(*ptep)) {
@@ -382,16 +306,6 @@ int ml_set_inlist(struct mm_struct *mm, ulong address) {
 	return 0;       // Failure
 }
 
-int ml_reset_inlist_pte(struct mm_struct *mm, ulong address, pte_t* ptep) {
-	if(ptep && pte_present(*ptep)) {
-		set_pte( ptep , pte_clear_flags(*ptep, _PAGE_SOFTW2) );
-		return 1;   // Success
-	}
-	
-	return 0;           // Failure
-}
-EXPORT_SYMBOL(ml_reset_inlist_pte);
-
 int ml_reset_inlist(struct mm_struct *mm, ulong address) {
 	pte_t* ptep = ml_get_ptep(mm, address);
 	if(ptep && pte_present(*ptep)) {
@@ -400,7 +314,7 @@ int ml_reset_inlist(struct mm_struct *mm, ulong address) {
 	}
 	
 	return 0;           // Failure
-}
+}*/
 
 struct task_struct * ml_get_task_struct(pid_t pid) {
 	struct pid *ps = NULL;
