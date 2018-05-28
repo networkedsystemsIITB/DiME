@@ -39,7 +39,15 @@ struct dime_instance_struct {
 	ulong			local_npages;
 	atomic_long_t	pc_pagefaults;
 	atomic_long_t	an_pagefaults;
-	atomic_long_t	cpu_cycles_used;
+
+
+	atomic_long_t	pagefaults;
+	atomic_long_t	time_pfh;			// linux do_page_fault
+	atomic_long_t	time_ap;			// add_page time
+	atomic_long_t	time_inject;		// delay injection time
+	atomic_long_t	time_pfh_ap;		// time of linux do_page_fault + policy add_page
+	atomic_long_t	time_pfh_ap_inject;	// total time of all
+
 	atomic_long_t	duplecate_pfs;
 	rwlock_t 		lock;
 
@@ -69,7 +77,7 @@ struct lpl {
 extern struct dime_struct dime;
 
 
-void inject_delay(struct dime_instance_struct *dime_instance);
+void inject_delay(struct dime_instance_struct *dime_instance, unsigned long long diff);
 int register_page_replacement_policy(struct page_replacement_policy_struct *prp);
 int deregister_page_replacement_policy(struct page_replacement_policy_struct *prp);
 

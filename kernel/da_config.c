@@ -53,24 +53,38 @@ static ssize_t procfile_read(struct file *file, char *buffer, size_t length, lof
         // offset is 0, so first call to read the file.
         // Initialize buffer with config parameters currently set
         int i, j;
-        procfs_buffer_size = sprintf(procfs_buffer, "instance_id latency_ns bandwidth_bps        local_npages page_fault_count duplecate_pfs pc_pagefaults an_pagefaults cpu_cycles_used cpu_per_pf pid\n");
+                                                    // 1         2          3                    4            5                6             7             8             9          10         11          12          13                 14           15          16              17              18                     19
+        procfs_buffer_size = sprintf(procfs_buffer, "instance_id latency_ns bandwidth_bps        local_npages page_fault_count duplecate_pfs pc_pagefaults an_pagefaults time_pfh   time_ap    time_inject time_pfh_ap time_pfh_ap_inject time_pfh_ppf time_ap_ppf time_inject_ppf time_pfh_ap_ppf time_pfh_ap_inject_ppf pid\n");
         for(i=0 ; i<dime.dime_instances_size ; ++i) {
-            unsigned long long pc_pf        = atomic_long_read(&dime.dime_instances[i].pc_pagefaults);
-            unsigned long long an_pf        = atomic_long_read(&dime.dime_instances[i].an_pagefaults);
-            unsigned long long total_pf     = pc_pf + an_pf;
-            unsigned long long cpu_used     = atomic_long_read(&dime.dime_instances[i].cpu_cycles_used);
-            unsigned long long dup_pfs      = atomic_long_read(&dime.dime_instances[i].duplecate_pfs);
+            unsigned long long total_pf             = atomic_long_read(&dime.dime_instances[i].pagefaults);
+            unsigned long long dup_pfs              = atomic_long_read(&dime.dime_instances[i].duplecate_pfs);
+            unsigned long long time_pfh             = atomic_long_read(&dime.dime_instances[i].time_pfh);
+            unsigned long long time_ap              = atomic_long_read(&dime.dime_instances[i].time_ap);
+            unsigned long long time_inject          = atomic_long_read(&dime.dime_instances[i].time_inject);
+            unsigned long long time_pfh_ap          = atomic_long_read(&dime.dime_instances[i].time_pfh_ap);
+            unsigned long long time_pfh_ap_inject   = atomic_long_read(&dime.dime_instances[i].time_pfh_ap_inject);
+            total_pf = total_pf<=0 ? 1 : total_pf;
             procfs_buffer_size += sprintf(procfs_buffer+procfs_buffer_size, 
-                                            "%11d %10lu %20lu %12lu %16llu %13llu %13llu %13llu %15llu %10llu ", dime.dime_instances[i].instance_id,
-                                                                        dime.dime_instances[i].latency_ns,
-                                                                        dime.dime_instances[i].bandwidth_bps,
-                                                                        dime.dime_instances[i].local_npages,
-                                                                        total_pf,
-                                                                        dup_pfs,
-                                                                        pc_pf,
-                                                                        an_pf,
-                                                                        cpu_used,
-                                                                        cpu_used / (total_pf<=0 ? 1 : total_pf));
+                                            //1   2     3     4     5      6      7      8      9      10     11     12     13     14     15     16     17     18
+                                            "%11d %10lu %20lu %12lu %16llu %13llu %13lu %13lu %10llu %10llu %11llu %11llu %18llu %12llu %11llu %15llu %15llu %22llu ", 
+                                                                        dime.dime_instances[i].instance_id, // 1
+                                                                        dime.dime_instances[i].latency_ns, // 2
+                                                                        dime.dime_instances[i].bandwidth_bps, // 3
+                                                                        dime.dime_instances[i].local_npages, // 4
+                                                                        total_pf, // 5
+                                                                        dup_pfs, // 6
+                                                                        atomic_long_read(&dime.dime_instances[i].pc_pagefaults), // 7
+                                                                        atomic_long_read(&dime.dime_instances[i].an_pagefaults), // 8
+                                                                        time_pfh, // 9
+                                                                        time_ap, // 10
+                                                                        time_inject, // 11
+                                                                        time_pfh_ap, // 12
+                                                                        time_pfh_ap_inject, // 13
+                                                                        time_pfh / total_pf, // 14
+                                                                        time_ap / total_pf, // 15
+                                                                        time_inject / total_pf, // 16
+                                                                        time_pfh_ap / total_pf, // 17
+                                                                        time_pfh_ap_inject / total_pf); // 18
             for(j=0 ; j<dime.dime_instances[i].pid_count ; ++j) {
                 procfs_buffer_size += sprintf(procfs_buffer+procfs_buffer_size, "%d,", dime.dime_instances[i].pid[j]);
             }
@@ -243,7 +257,11 @@ static ssize_t procfile_write(struct file *file, const char *buffer, size_t leng
         dime.dime_instances[update_instance_id].prp                   = NULL;
         atomic_long_set(&dime.dime_instances[update_instance_id].pc_pagefaults, 0);
         atomic_long_set(&dime.dime_instances[update_instance_id].an_pagefaults, 0);
-        atomic_long_set(&dime.dime_instances[update_instance_id].cpu_cycles_used, 0);
+        atomic_long_set(&dime.dime_instances[update_instance_id].time_pfh, 0);
+        atomic_long_set(&dime.dime_instances[update_instance_id].time_ap, 0);
+        atomic_long_set(&dime.dime_instances[update_instance_id].time_inject, 0);
+        atomic_long_set(&dime.dime_instances[update_instance_id].time_pfh_ap, 0);
+        atomic_long_set(&dime.dime_instances[update_instance_id].time_pfh_ap_inject, 0);
         dime.dime_instances_size                                      = update_instance_id+1;
         write_unlock(&dime.dime_instances[update_instance_id].lock);
     }
