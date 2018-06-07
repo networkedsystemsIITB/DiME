@@ -6,7 +6,7 @@
 struct prp_random_struct {
 	struct page_replacement_policy_struct prp;
 
-	struct lpl_node_struct *lpl;
+	struct lpl_node_struct **lpl;
 	unsigned long lpl_size;			// Max size of array allocated
 	
 	rwlock_t lock;

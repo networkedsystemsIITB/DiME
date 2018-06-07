@@ -60,10 +60,10 @@ int add_page (struct dime_instance_struct *dime_instance, struct pid * c_pid, ul
 		do {
 			get_random_bytes(&rnd, sizeof(unsigned long));
 			rnd %= prp_random->lpl_size;
-		} while(!spin_trylock(&prp_random->lpl[rnd].lock));
+		} while(!spin_trylock(&prp_random->lpl[rnd]->lock));
 
 		// protect random last address, so that it will be faulted in future
-		node_to_replace = &prp_random->lpl[rnd];
+		node_to_replace = prp_random->lpl[rnd];
 		if(node_to_replace->address) {
 			if(node_to_replace->pid_s->numbers[0].nr <= 0)
 				 DA_ERROR("invalid pid: %d : address:%lu", node_to_replace->pid_s->numbers[0].nr, node_to_replace->address);
@@ -74,10 +74,9 @@ int add_page (struct dime_instance_struct *dime_instance, struct pid * c_pid, ul
 		node_to_replace->address = c_addr;
 		node_to_replace->pid_s = c_pid;
 
-		spin_unlock(&prp_random->lpl[rnd].lock);
-
-		ml_set_accessed_pte(c_mm, c_addr, c_ptep);
 		ml_set_inlist_pte(c_mm, c_addr, c_ptep);
+
+		spin_unlock(&prp_random->lpl[rnd]->lock);
 
 		// Since local pages are occupied, delay should be injected
 		ret_execute_delay = 1;
@@ -99,11 +98,17 @@ int add_page (struct dime_instance_struct *dime_instance, struct pid * c_pid, ul
 }
 
 void clean_list (struct dime_instance_struct *dime_instance) {
+	int i;
 	struct prp_random_struct *prp_random = NULL;
 	DA_ENTRY();
 	prp_random = to_prp_random_struct(dime_instance->prp);
 	dime_instance->prp->add_page = NULL;
+
+	for(i=0 ; i<prp_random->lpl_size ; ++i) {
+		kfree(prp_random->lpl[i]);
+	}
 	kfree(prp_random->lpl);
+
 	dime_instance->prp = NULL;
 	DA_EXIT();
 }
@@ -131,14 +136,15 @@ int init_module (void) {
 			.lock			= __RW_LOCK_UNLOCKED(prp_random->lock),
 		};
 
-		prp_random->lpl = (struct lpl_node_struct *) kmalloc(sizeof(struct lpl_node_struct) * dime.dime_instances[i].local_npages, GFP_KERNEL);
+		prp_random->lpl = (struct lpl_node_struct **) kmalloc(sizeof(struct lpl_node_struct *) * dime.dime_instances[i].local_npages, GFP_KERNEL);
 		if(!prp_random->lpl) {
 			DA_ERROR("unable to allocate memory");
 			return -1; // TODO:: Error codes
 		}
 		for(j=0 ; j<prp_random->lpl_size ; ++j) {
-			prp_random->lpl[j] = (struct lpl_node_struct) {0};
-			prp_random->lpl[j].lock = __SPIN_LOCK_UNLOCKED(prp_random->lpl[j].lock);
+			prp_random->lpl[j] = (struct lpl_node_struct *) kmalloc(sizeof(struct lpl_node_struct), GFP_KERNEL);
+			*prp_random->lpl[j] = (struct lpl_node_struct) {0};
+			prp_random->lpl[j]->lock = __SPIN_LOCK_UNLOCKED(prp_random->lpl[j]->lock);
 		}
 //		rwlock_init(&(prp_random->lock));
 		dime.dime_instances[i].prp = &(prp_random->prp);
