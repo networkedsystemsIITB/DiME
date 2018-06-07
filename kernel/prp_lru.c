@@ -41,14 +41,13 @@ static ulong	free_list_max_size		= 4000ULL;
 
 module_param(kswapd_sleep_ms, int, 0644);
 module_param(free_list_max_size, ulong, 0644);
-#define MIN_FREE_PAGES_PERCENT 	20				// percentage of local memory available in free list
+#define MIN_FREE_PAGES_PERCENT 	25				// percentage of local memory available in free list
 
 MODULE_PARM_DESC(kswapd_sleep_ms, "Sleep time in ms of dime_kswapd thread");
 MODULE_PARM_DESC(free_list_max_size, "Max size of free list");
 
 
-static struct prp_lru_struct *to_prp_lru_struct(struct page_replacement_policy_struct *prp)
-{
+static inline struct prp_lru_struct *to_prp_lru_struct(struct page_replacement_policy_struct *prp) {
 	return container_of(prp, struct prp_lru_struct, prp);
 }
 
@@ -291,40 +290,6 @@ int add_page(struct dime_instance_struct *dime_instance, struct pid * c_pid, ulo
 	struct prp_lru_struct	* prp_lru			= to_prp_lru_struct(dime_instance->prp);
 	int 					ret_execute_delay	= 1;
 
-
-	//c_addr = c_addr - c_addr%PAGE_SIZE; // start address of a page that this address belongs
-
-	// pages in local memory more than the configured dime instance quota, evict extra pages
-	// possible when instance configuration is changed dynamically using proc file /proc/dime_config
-	if(dime_instance->local_npages < atomic_long_read(&prp_lru->lpl_count)) {
-		struct lpl_node_struct * node = NULL;
-		// TODO:: not required till dynamic changes, need to apply locks
-		write_lock(&prp_lru->lock);
-		while (dime_instance->local_npages < atomic_long_read(&prp_lru->lpl_count)) {
-			struct list_head *first_node = NULL;
-			if(!list_empty(prp_lru->inactive_pc.head.next))
-				first_node = prp_lru->inactive_pc.head.next;
-			else if(!list_empty(prp_lru->inactive_an.head.next))
-				first_node = prp_lru->inactive_an.head.next;
-			else if(!list_empty(prp_lru->active_pc.head.next))
-				first_node = prp_lru->active_pc.head.next;
-			else if(!list_empty(prp_lru->active_an.head.next))
-				first_node = prp_lru->active_an.head.next;
-			else
-				DA_ERROR("all lists are empty, unable to select node");
-			list_del_rcu(first_node);
-			atomic_long_dec(&prp_lru->lpl_count);
-
-			node = list_entry(first_node, struct lpl_node_struct, list_node);
-
-			ml_protect_page(ml_get_mm_struct(node->pid_s->numbers[0].nr), node->address);
-			kfree(node);
-			node = NULL;
-			DA_INFO("remove extra local page, current count:%lu", atomic_long_read(&prp_lru->lpl_count));
-		}
-		write_unlock(&prp_lru->lock);
-	}
-
 	if (dime_instance->local_npages == 0) {
 		// no need to add this address
 		// we can treat this case as infinite local pages, and no need to inject delay on any of the page
@@ -438,7 +403,8 @@ FREE_NODE_FOUND:
 	// This happens recursively if accessed bit is not set for each requested page.
 	// So, set accessed bit to all requested pages
 	// TODO:: verify requirement of this
-	ml_set_accessed_pte(c_mm, c_addr, c_ptep);
+	//ml_set_accessed_pte(c_mm, c_addr, c_ptep);
+	ml_set_inlist_pte(c_mm, c_addr, c_ptep);
 
 
 	if(c_page) {
@@ -638,7 +604,7 @@ int try_to_free_pages(struct dime_instance_struct *dime_instance, struct lpl *pl
 			// inject delay if dirty page
 			if(pte_dirty(*i_ptep)) {
 				// emulate page flush, inject delay
-				inject_delay(dime_instance);
+				inject_delay(dime_instance, 0);
 
 				// clear dirty bit
 				*i_ptep = pte_mkclean(*i_ptep);
