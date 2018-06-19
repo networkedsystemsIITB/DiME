@@ -1,28 +1,29 @@
 #!/bin/awk
 
 BEGIN {
+	last_col_index = 1
 }
 
 {
-	delete vals;
 	for (i = 1 ; i <= NF ; i += 2) {
-		if (length(label[i]) == 0)
-		{
-			label[i] = $i;
-		} else if (label[i] != $i) {
-			print "LABEL MISMATCH\n\n";
-			next
+		if(length(dict_labels[$i]) == 0) {
+			dict_labels[$i] = last_col_index
+			dict_order[last_col_index] = $i
+			last_col_index++
 		}
-		vals[int((i+1)/2)];
-		printf("%s\t", $(i+1));
+		dict[$i][NR] = $(i+1)
 	}
-	print ""
 }
 
 END {
-	print " ";
-	for(i in label) {
-		printf("%s\t", label[i]);
+	for(i in dict_order) {
+		printf("%s\t", dict_order[i]);
+	}
+	for(i in dict["test"]) {
+		print " ";
+		for(j in dict_order) {
+			printf("%s\t", dict[dict_order[j]][i]);
+		}
 	}
 	print "";
 }
