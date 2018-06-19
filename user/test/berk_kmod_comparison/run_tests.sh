@@ -64,19 +64,30 @@ function kmod_remove_module {
 		' || exit 1
 }
 
-function kmod_insert_module {
-	kmod_remove_module
-
+function get_instance1_pid {
 	if [ $process1 = redis ]; then
 		instance1_pid=`ssh root@$server_ip "ps aux | grep redis | grep $redis_instance1_port | head -n1 | sed 's/[ \t]\+/\t/g' | cut -f 2"`
 	elif [ $process1 = memcached ]; then
 		instance1_pid=`ssh root@$server_ip "ps aux | grep memcached | grep $memcached_instance1_port | head -n1 | sed 's/[ \t]\+/\t/g' | cut -f 2"`
 	fi
+	echo $instance1_pid
+}
+function get_instance2_pid {
 	if [ $process2 = redis ]; then
 		instance2_pid=`ssh root@$server_ip "ps aux | grep redis | grep $redis_instance2_port | head -n1 | sed 's/[ \t]\+/\t/g' | cut -f 2"`
 	elif [ $process2 = memcached ]; then
 		instance2_pid=`ssh root@$server_ip "ps aux | grep memcached | grep $memcached_instance2_port | head -n1 | sed 's/[ \t]\+/\t/g' | cut -f 2"`
 	fi
+	echo $instance2_pid
+}
+
+function kmod_insert_module {
+	kmod_remove_module
+
+	ssh root@$server_ip "dmesg -c > /dev/null"
+
+	instance1_pid=$(get_instance1_pid)
+	instance2_pid=$(get_instance2_pid)
 	
 	if [ $test_mode = single -o $test_mode = multisingle ]; then
 		pid=$instance1_pid
@@ -174,7 +185,15 @@ function redis_load {
 	if [ $bench_tool = ycsb ]; then
 		pushd $ycsb_home > /dev/null
 			./bin/ycsb load redis -s \
-				-P $redis_workload_config \
+				-p workload=$ycsb_workload \
+				-p readallfields=$ycsb_readallfields \
+				-p readproportion=$ycsb_readproportion \
+				-p updateproportion=$ycsb_updateproportion \
+				-p scanproportion=$ycsb_scanproportion \
+				-p insertproportion=$ycsb_insertproportion \
+				-p requestdistribution=$ycsb_requestdistribution \
+				-p recordcount=$workload_b \
+				-p operationcount=$workload_b_run \
 				-p "redis.host=$server_ip" \
 				-p "redis.port=$server_port" \
 				-threads $client_threads
@@ -197,7 +216,15 @@ function memcached_load {
 	if [ $bench_tool = ycsb ]; then
 		pushd $ycsb_home > /dev/null
 			./bin/ycsb load memcached -s \
-				-P $memcached_workload_config \
+				-p workload=$ycsb_workload \
+				-p readallfields=$ycsb_readallfields \
+				-p readproportion=$ycsb_readproportion \
+				-p updateproportion=$ycsb_updateproportion \
+				-p scanproportion=$ycsb_scanproportion \
+				-p insertproportion=$ycsb_insertproportion \
+				-p requestdistribution=$ycsb_requestdistribution \
+				-p recordcount=$workload_b \
+				-p operationcount=$workload_b_run \
 				-p "memcached.hosts=${server_ip}:${server_port}" \
 				-threads $client_threads
 		popd > /dev/null
@@ -219,13 +246,21 @@ function redis_run {
 	if [ $bench_tool = ycsb ]; then
 		pushd $ycsb_home > /dev/null
 			./bin/ycsb run redis -s \
-				-P $redis_workload_config \
+				-p workload=$ycsb_workload \
+				-p readallfields=$ycsb_readallfields \
+				-p readproportion=$ycsb_readproportion \
+				-p updateproportion=$ycsb_updateproportion \
+				-p scanproportion=$ycsb_scanproportion \
+				-p insertproportion=$ycsb_insertproportion \
+				-p requestdistribution=$ycsb_requestdistribution \
+				-p recordcount=$workload_b \
+				-p operationcount=$workload_b_run \
 				-p "redis.host=$server_ip" \
 				-p "redis.port=$server_port" \
 				-threads $client_threads
 		popd > /dev/null
 	elif [ $bench_tool = memtier ]; then
-		memtier_benchmark -s ${server_ip} -p ${server_port} -P redis -n $(($workload_b_run  / $client_threads / $clients_per_thread)) -c $clients_per_thread -t $client_threads --ratio 50:50 -d 1000 --key-maximum=$workload_b --key-pattern=G:G --hide-histogram # --key-stddev=$(($workload_b))
+		memtier_benchmark -s ${server_ip} -p ${server_port} -P redis -n $(($workload_b_run  / $client_threads / $clients_per_thread)) -c $clients_per_thread -t $client_threads --ratio 50:50 -d 1000 --key-maximum=$workload_b --key-pattern=P:P --hide-histogram # --key-stddev=$(($workload_b))
 	fi
 }
 
@@ -242,12 +277,20 @@ function memcached_run {
 	if [ $bench_tool = ycsb ]; then
 		pushd $ycsb_home > /dev/null
 			./bin/ycsb run memcached -s \
-				-P $memcached_workload_config \
+				-p workload=$ycsb_workload \
+				-p readallfields=$ycsb_readallfields \
+				-p readproportion=$ycsb_readproportion \
+				-p updateproportion=$ycsb_updateproportion \
+				-p scanproportion=$ycsb_scanproportion \
+				-p insertproportion=$ycsb_insertproportion \
+				-p requestdistribution=$ycsb_requestdistribution \
+				-p recordcount=$workload_b \
+				-p operationcount=$workload_b_run \
 				-p "memcached.hosts=${server_ip}:${server_port}" \
 				-threads $client_threads
 		popd > /dev/null
 	elif [ $bench_tool = memtier ]; then
-		memtier_benchmark -s ${server_ip} -p ${server_port} -P memcache_binary -n $(($workload_b_run / $client_threads / $clients_per_thread)) -c $clients_per_thread -t $client_threads --ratio 50:50 -d 1000 --key-maximum=$workload_b --key-pattern=G:G --hide-histogram #--key-stddev=$(($workload_b)) 
+		memtier_benchmark -s ${server_ip} -p ${server_port} -P memcache_binary -n $(($workload_b_run / $client_threads / $clients_per_thread)) -c $clients_per_thread -t $client_threads --ratio 50:50 -d 1000 --key-maximum=$workload_b --key-pattern=P:P --hide-histogram #--key-stddev=$(($workload_b)) 
 	fi
 }
 
@@ -304,52 +347,67 @@ function run_processes {
 	sleep 2
 
 	pushd $ycsb_home > /dev/null
+		kmod_insert_module
+		ssh root@$server_ip "dmesg -w" > ${testfile_prefix}-load_dmesg.log &
+		dmsg_pid=$!
+
 		# load data to both redis and memcached
 		if [ ! $test_mode = single ]
 		then
 			load_process 2 &
+			second_instance_pid=$!
 			load_process 1
+			wait $second_instance_pid   # wait for loading
 		else
 			load_process 1
 		fi
 
-		wait	# wait for loading
-
 		#echo "Module has been inserted, press ENTER after starting stab probe";
 		#read -r
 
-		kmod_insert_module
-
+		sleep 2
 		kmod_get_module_stats >> ${testfile_prefix}-instance-1-load.log
 		if [ "$enable_module" == "kmod_fifo" -o "$enable_module" == "kmod_lru" -o "$enable_module" == "kmod_random" ]; then
 			ssh root@$server_ip "cat /proc/dime_config" > ${testfile_prefix}-load-kmod_stats.log
 			ssh root@$server_ip "cat /proc/dime_prp_config" > ${testfile_prefix}-load-kmod_prp_stats.log
 		fi
+		kmod_remove_module
+		echo "Killing dmesg -w for load : $dmsg_pid"
+		kill $dmsg_pid
 
+
+
+		kmod_insert_module
+		ssh root@$server_ip "dmesg -w" > ${testfile_prefix}-run_dmesg.log &
+		dmsg_pid=$!
 
 		if [ ! $test_mode = single ]
 		then
 			run_process 2 &
+			second_instance_pid=$!
 			run_process 1
+			wait $second_instance_pid
 			# kill other instance client
 			#kill $(ps aux | grep 'ycsb' | grep -v "grep" | awk '{print $2}')
 		else
 			run_process 1
 		fi
 
-		wait
-
 		kmod_get_module_stats >> ${testfile_prefix}-instance-1-run.log
-
 		if [ "$enable_module" == "kmod_fifo" -o "$enable_module" == "kmod_lru" -o "$enable_module" == "kmod_random" ]; then
 			ssh root@$server_ip "cat /proc/dime_config" > ${testfile_prefix}-run-kmod_stats.log
 			ssh root@$server_ip "cat /proc/dime_prp_config" > ${testfile_prefix}-run-kmod_prp_stats.log
 		fi
 
-	popd > /dev/null
+		kmod_remove_module
+		echo "Killing dmesg -w for run : $dmsg_pid"
+		kill $dmsg_pid
 
-	kmod_remove_module
-	ssh root@$server_ip "dmesg -c" > ${testfile_prefix}-dmesg.log
+		instance1_pid=$(get_instance1_pid)
+		instance2_pid=$(get_instance2_pid)
+		ssh root@$server_ip "cat /proc/$instance1_pid/maps" > ${testfile_prefix}-process1_maps.log
+		ssh root@$server_ip "cat /proc/$instance2_pid/maps" > ${testfile_prefix}-process2_maps.log
+	popd > /dev/null
 
 	#echo "DONE, stop stap";
 	#read -r
@@ -362,7 +420,7 @@ function run_test {
 	fi
 	
 	
-	testname="test-${testcase}-cth-${client_threads}-cpt-${clients_per_thread}-bench-${bench_tool}-mod-${enable_module}-test_mode-${test_mode}-process1-${process1}-process2-${process2}"
+	testname="test-${testcase}-cth-${client_threads}-cpt-${clients_per_thread}-workload-${workload_b}-workload_accessed-${workload_b_run}-bench-${bench_tool}-mod-${enable_module}-test_mode-${test_mode}-process1-${process1}-process2-${process2}"
 
 	if [ "$enable_module" == "no" ]; then
 		berk_remove_module
@@ -421,8 +479,8 @@ kmod_path_on_server="/root/DiME/kernel/kmodule.ko"
 kmod_prp_fifo_path_on_server="/root/DiME/kernel/prp_fifo_module.ko"
 kmod_prp_lru_path_on_server="/root/DiME/kernel/prp_lru_module.ko"
 kmod_prp_random_path_on_server="/root/DiME/kernel/prp_random_module.ko"
-redis_workload_config="${ycsb_home}/workloads/workloada_r"
-memcached_workload_config="${ycsb_home}/workloads/workloada_m"
+#redis_workload_config="${ycsb_home}/workloads/workloada_r"
+#memcached_workload_config="${ycsb_home}/workloads/workloada_m"
 #kmod_process_in_module="redis1"	# shared/separate/redis1/redis2
 redis_instance1_port=6381
 redis_instance2_port=6382
@@ -433,9 +491,27 @@ process2="memcached"
 test_mode="single"		# shared/separate/single/multisingle
 enable_module="no"		# kmod_lru kmod_fifo
 
-workload_b=6000000		# number of 1000b records
-workload_b_run=20000000	# number of 1000b records
+# YCSB workload parameters
+ycsb_workload=com.yahoo.ycsb.workloads.CoreWorkload
+ycsb_readallfields=true
+ycsb_readproportion=0.5 #1 #0.5
+ycsb_updateproportion=0.5 #0 #0.5
+ycsb_scanproportion=0
+ycsb_insertproportion=0
+ycsb_requestdistribution=zipfian #sequential #zipfian
+#workload_b=100000		# number of 1000b records
+workload_b=2000000		# number of 1000b records
+#workload_b=10		# number of 1000b records
+#workload_b_run=100000	# number of 1000b records
+workload_b_run=2000000	# number of 1000b records
+#workload_b_run=10	# number of 1000b records
+##########################################################################################################
+#workload_b=6000000		# number of 1000b records
+#workload_b_run=40000000	# number of 1000b records
 
+##########################################################################################################
+#client_threads=100
+#clients_per_thread=50
 client_threads=100
 clients_per_thread=50
 bench_tool="ycsb"	# memtier ycsb
@@ -449,24 +525,28 @@ kmod_kswapd_sleep_ms=1
 kmod_free_list_max_size=4000
 
 
-for kmod_latency_ns in 2500;
+for testcase in {1..100};
 do
-	for testcase in {1..10};
+	for bench_tool in "ycsb"; # "memtier"; #"ycsb"
 	do
-		for process1 in "redis" "memcached";
+		for kmod_latency_ns in 50000; #60000 2500 25000; # 1000000; #100000 25000 2500; # not more than 5000000, redis client times out;
 		do
-			for bench_tool in "ycsb"; # "memtier"; #"ycsb" 
+			for process1 in "memcached"; #"redis";
 			do
 				if [ $bench_tool = memtier ];
 				then
 					client_threads=9;
 					clients_per_thread=50;
+					#client_threads=1;
+					#clients_per_thread=1;
 				else
 					client_threads=100;
 					clients_per_thread=50;
+					#client_threads=1;
+					#clients_per_thread=1;
 				fi
 
-				for kmod_local_npages in 150000;
+				for kmod_local_npages in 0; #3649; #7298 10947; #10% 20% 30% of 36490 #50000; # 300000;
 				do
 					temp_local_npages=$kmod_local_npages;
 					for test_mode in "single"; #"separate" "shared";
@@ -478,23 +558,25 @@ do
 							kmod_local_npages=$temp_local_npages;
 						fi
 
-
-						for enable_module in "kmod_random" "kmod_fifo";
-						do
-							run_test
-						done
-
-						
-						for kmod_free_list_max_size in 15000; #25600 100 1600;
+						for kmod_free_list_max_size in 6000; #25600 100 1600;
 						do
 							for kmod_kswapd_sleep_ms in 64; #1 16 64 256 512;
 							do
-								for enable_module in "kmod_lru";
-								do
-									run_test
-								done
+								#for workload_b in 100000; #1 5 10 20 30 40 50 60 70 80 90 100 200 300 400 500 600 700 800 900 1000 2000 3000 4000 5000 6000 7000 8000 9000 10000 20000 30000 40000 50000 60000 70000 80000 90000 100000;
+								#do
+									#workload_b_run=$workload_b
+									for enable_module in "kmod_fifo"; #"kmod_lru"; # "kmod_fifo"
+									do
+										run_test
+									done
+								#done
 							done
 						done
+
+					#	for enable_module in "kmod_random";
+					#	do
+					#		run_test
+					#	done
 					done
 				done
 			done
