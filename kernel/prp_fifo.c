@@ -169,16 +169,15 @@ int add_page(struct dime_instance_struct *dime_instance, struct pid * c_pid, ulo
 	list_add_tail_rcu(&(node_to_replace->list_node), &prp_fifo->local.head);
 	write_unlock(&prp_fifo->local.lock);
 
-	ml_set_inlist_pte(c_mm, address, c_ptep);
-
 COUNT_PAGEFAULTS:
+	ml_set_inlist_pte(c_mm, address, c_ptep);
 	if(c_page) {
 		if( ((unsigned long)(c_page->mapping) & (unsigned long)0x01) != 0 ) {
 			atomic_long_inc(&dime_instance->an_pagefaults);
-			DA_INFO("pc : %lx", address);
+			//DA_INFO("pc : %lx", address);
 		} else {
 			atomic_long_inc(&dime_instance->pc_pagefaults);
-			DA_INFO("an : %lx", address);
+			//DA_INFO("an : %lx", address);
 		}
 	} else {
 		DA_ERROR("invalid page mapping %lx : %p : %p", address, c_page, c_page->mapping);

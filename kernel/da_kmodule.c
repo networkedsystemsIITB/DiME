@@ -138,6 +138,7 @@ void inject_delay(struct dime_instance_struct *dime_instance, unsigned long long
     delay_ns = ((PAGE_SIZE * 8ULL) * 1000000000ULL) / dime_instance->bandwidth_bps;  // Transmission delay
     delay_ns += 2*dime_instance->latency_ns;                                         // Two way latency
 
+    /*
     diff = atomic_long_read(&dime_instance->pagefaults)*delay_ns;
     curr = atomic_long_read(&dime_instance->time_pfh_ap_inject);
     if( curr > diff ) {
@@ -151,6 +152,11 @@ void inject_delay(struct dime_instance_struct *dime_instance, unsigned long long
     } else {
         delay_ns = 0;
     }
+    */
+    
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // inject diff worth delay : testing
+    //delay_ns = diff;
 
 
 
@@ -270,6 +276,9 @@ int do_page_fault_hook_start_new (struct pt_regs *regs,
         pte_t *ptep = ml_get_ptep(current->mm, address);
         if(ml_is_inlist_pte(current->mm, address, ptep)) {
             atomic_long_inc(&dime_instance->duplecate_pfs);
+            *hook_flag = 0;
+        } else {
+            *hook_flag = 1;
         }
     }
 
@@ -286,42 +295,45 @@ int do_page_fault_hook_end_new (struct pt_regs *regs,
                             unsigned long address,
                             int * hook_flag,
                             ulong * hook_timestamp) {
-    struct dime_instance_struct *dime_instance = pt_get_dime_instance_of_pid(&dime, current->tgid);
-    unsigned long long time_pfh = 0,
-        time_ap = 0,
-        time_inject = 0,
-        time_pfh_ap = 0,
-        time_pfh_ap_inject = 0;
+    if(*hook_flag == 1) {
+        struct dime_instance_struct *dime_instance = pt_get_dime_instance_of_pid(&dime, current->tgid);
+        unsigned long long time_pfh = 0,
+            time_ap = 0,
+            time_inject = 0,
+            time_pfh_ap = 0,
+            time_pfh_ap_inject = 0;
 
-    if(address != 0ul && dime_instance) {
-        // Inject delays here
-        time_pfh = sched_clock() - *hook_timestamp;
-        atomic_long_add(time_pfh, &dime_instance->time_pfh);
-        
-        time_ap = sched_clock();
-        
-        if(dime_instance->prp && dime_instance->prp->add_page && dime_instance->prp->add_page(dime_instance, task_pid(current), address) == 1) {
+        if(address != 0ul && dime_instance) {
+            // Inject delays here
+            time_pfh = sched_clock() - *hook_timestamp;
+            atomic_long_add(time_pfh, &dime_instance->time_pfh);
+            
+            time_ap = sched_clock();
+            
+            if(dime_instance->prp && dime_instance->prp->add_page && dime_instance->prp->add_page(dime_instance, task_pid(current), address) == 1) {
+            }
+
+            time_ap = sched_clock() - time_ap;
+            atomic_long_add(time_ap, &dime_instance->time_ap);
+
+            time_pfh_ap = sched_clock() - *hook_timestamp;
+            atomic_long_add(time_pfh_ap, &dime_instance->time_pfh_ap);
+
+            time_inject = sched_clock();
+
+            inject_delay(dime_instance, time_pfh_ap);
+            //inject_delay(dime_instance, time_pfh);
+
+            time_inject = sched_clock() - time_inject;
+            atomic_long_add(time_inject, &dime_instance->time_inject);
+
+            time_pfh_ap_inject = sched_clock() - *hook_timestamp;
+            atomic_long_add(time_pfh_ap_inject, &dime_instance->time_pfh_ap_inject);
+
+            atomic_long_inc(&dime_instance->pagefaults);
         }
-
-        time_ap = sched_clock() - time_ap;
-        atomic_long_add(time_ap, &dime_instance->time_ap);
-
-        time_pfh_ap = sched_clock() - *hook_timestamp;
-        atomic_long_add(time_pfh_ap, &dime_instance->time_pfh_ap);
-
-        time_inject = sched_clock();
-
-        inject_delay(dime_instance, time_pfh_ap);
-
-        time_inject = sched_clock() - time_inject;
-        atomic_long_add(time_inject, &dime_instance->time_inject);
-
-        time_pfh_ap_inject = sched_clock() - *hook_timestamp;
-        atomic_long_add(time_pfh_ap_inject, &dime_instance->time_pfh_ap_inject);
-
-        atomic_long_inc(&dime_instance->pagefaults);
     }
-
+    
     return 0;
 }
 
